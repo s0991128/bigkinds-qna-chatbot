@@ -29,7 +29,7 @@ window.BIGKINDS_CHATBOT_CONFIG = {
     contactLabel: "빅카인즈 안내",
     purchaseRequestUrl: "https://forms.gle/mb1d4jSFLhUnoSzv6",
     purchaseRequestLabel: "API 구매 요청",
-    phone: "02-2001-7793",
+    phone: "02-2001-7574",
     businessHours: "평일 09:00~18:00"
   },
   privacy: {
