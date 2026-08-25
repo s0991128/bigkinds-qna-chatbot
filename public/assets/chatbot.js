@@ -18,11 +18,6 @@
 
   const answerText = (value) => esc(String(value ?? "").replace(/¶/g, "\n"));
 
-  const pageSuggestions = () => {
-    const context = document.body?.dataset?.bkContext;
-    return config.contextSuggestions?.[context] || config.suggestions || [];
-  };
-
   const normalize = (value) =>
     String(value)
       .toLowerCase()
@@ -282,14 +277,14 @@
     root.style.setProperty("--bk-accent", config.theme?.accent || "#18a77b");
 
     root.innerHTML = `
-      <button class="bk-launcher" type="button" aria-label="${esc(config.launcherLabel || config.serviceName)} 열기" aria-expanded="false" aria-controls="bigkinds-chatbot-panel">
-        <span class="bk-launcher-label">${esc(config.launcherLabel || "빅카인즈 이용안내")}</span>
+      <button class="bk-launcher" type="button" aria-label="${esc(config.serviceName)} 열기" aria-expanded="false">
+        <span class="bk-launcher-label">궁금한 내용을 물어보세요</span>
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M5 5.8A2.8 2.8 0 0 1 7.8 3h8.4A2.8 2.8 0 0 1 19 5.8v5.4a2.8 2.8 0 0 1-2.8 2.8h-5.7L6 18v-4.2a2.8 2.8 0 0 1-1-2.1V5.8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"></path>
           <path d="M8.5 8.5h7M8.5 11h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
         </svg>
       </button>
-      <section class="bk-panel" id="bigkinds-chatbot-panel" role="dialog" aria-label="${esc(config.serviceName)}" hidden>
+      <section class="bk-panel" role="dialog" aria-label="${esc(config.serviceName)}" hidden>
         <header class="bk-chat-head">
           <span class="bk-avatar">B</span>
           <span class="bk-head-copy">
@@ -301,7 +296,7 @@
         <div class="bk-notice">${esc(config.notice || "")}</div>
         <div class="bk-messages" aria-live="polite"></div>
         <div class="bk-chips">
-          ${pageSuggestions()
+          ${(config.suggestions || [])
             .map((question) => `<button class="bk-chip" type="button" data-question="${esc(question)}">${esc(question)}</button>`)
             .join("")}
         </div>
@@ -382,11 +377,6 @@
       });
     });
 
-    document.querySelectorAll("[data-open-chatbot]").forEach((button) => {
-      button.addEventListener("click", () => {
-        if (launcher.getAttribute("aria-expanded") !== "true") launcher.click();
-      });
-    });
   }
 
   window.BigKindsChatbot = {
