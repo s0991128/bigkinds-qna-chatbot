@@ -1,0 +1,12 @@
+{
+  "name": "bigkinds-qna-chatbot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "빅카인즈 공식 FAQ와 Open API 유료화 정책 기반 Q&A 챗봇",
+  "scripts": {
+    "start": "node server/server.mjs",
+    "validate": "node scripts/validate-data.mjs",
+    "test": "node --test tests/*.test.mjs"
+  }
+}
+
