@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="빅카인즈 이용방법, Open API, 요금·정책 문의를 돕는 Q&A 챗봇">
+  <title>빅카인즈 Q&A</title>
+  <link rel="stylesheet" href="./assets/chatbot.css">
+</head>
+<body>
+  <main class="demo-shell">
+    <header class="demo-header">
+      <a class="brand" href="#" aria-label="빅카인즈 홈">
+        <span class="brand-mark" aria-hidden="true">B</span>
+        <span><strong>BIG KINDS</strong><small>빅카인즈</small></span>
+      </a>
+      <span class="demo-badge">Q&A 챗봇 데모</span>
+    </header>
+
+    <section class="hero" aria-labelledby="hero-title">
+      <div>
+        <p class="eyebrow">BIG KINDS HELP DESK</p>
+        <h1 id="hero-title">궁금한 내용을<br><em>빠르게 찾아보세요.</em></h1>
+        <p>이용방법부터 Open API와 요금·정책까지, 공식 안내자료를 기준으로 답변합니다.</p>
+      </div>
+      <div class="topic-grid" aria-label="주요 문의 분야">
+        <button type="button" data-quick-question="빅카인즈에서 뉴스를 검색하는 방법을 알려줘"><span>01</span>이용방법</button>
+        <button type="button" data-quick-question="Open API는 어떻게 신청하나요?"><span>02</span>Open API</button>
+        <button type="button" data-quick-question="API 유료화 정책과 요금을 알려줘"><span>03</span>API 요금·정책</button>
+        <button type="button" data-quick-question="데이터 제공 범위가 궁금해요"><span>04</span>데이터 제공</button>
+      </div>
+    </section>
+
+    <footer class="demo-footer">한국언론진흥재단 · BIG KINDS</footer>
+  </main>
+
+  <div id="bigkinds-chatbot-root"></div>
+  <script src="./data/config.js?v=20260821-official3"></script>
+  <script src="./data/official-faq.js?v=20260821-official3"></script>
+  <script src="./data/verified-policy.js?v=20260821-official3"></script>
+  <script src="./data/qna-import.js?v=20260821-official3"></script>
+  <script src="./data/knowledge-base.js?v=20260821-official3"></script>
+  <script src="./assets/chatbot.js?v=20260821-official3"></script>
+</body>
+</html>
+
