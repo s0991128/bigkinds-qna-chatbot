@@ -16,6 +16,8 @@
       "'": "&#39;"
     })[ch]);
 
+  const answerText = (value) => esc(String(value ?? "").replace(/¶/g, "\n"));
+
   const normalize = (value) =>
     String(value)
       .toLowerCase()
@@ -115,7 +117,7 @@
     if (hasSensitive(question)) {
       const safe = kb.documents.find((doc) => doc.id === "privacy-security");
       return {
-        html: `<strong>${esc(safe?.title || "민감 정보 입력 주의")}</strong><br>${esc(
+        html: `<strong>${esc(safe?.title || "민감 정보 입력 주의")}</strong><br>${answerText(
           safe?.answer || config.privacy.warning
         )}${sourceHtml(safe)}`,
         escalate: true,
@@ -143,7 +145,7 @@
       : "";
 
     return {
-      html: `<strong>${esc(doc.title)}</strong><br>${esc(doc.answer)}${facts}${steps}${sourceHtml(doc)}`,
+      html: `<strong>${esc(doc.title)}</strong><br>${answerText(doc.answer)}${facts}${steps}${sourceHtml(doc)}`,
       escalate: shouldEscalate(question, top),
       category: doc.category,
       confidence: top.score,
