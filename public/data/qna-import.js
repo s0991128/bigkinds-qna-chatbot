@@ -1,0 +1,2 @@
+window.BIGKINDS_IMPORTED_QNA = [];
+
