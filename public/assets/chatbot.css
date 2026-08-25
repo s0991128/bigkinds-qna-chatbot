@@ -5,4 +5,5 @@
 .bk-feedback{display:flex;align-items:center;gap:6px;margin-top:10px;padding-top:9px;border-top:1px solid var(--bk-line);color:#7c879b;font-size:10px}.bk-feedback span{margin-right:auto}.bk-feedback button{padding:4px 8px;border:1px solid #dbe2ee;border-radius:99px;background:white;color:#53617c;font:inherit;font-size:10px;cursor:pointer}.bk-feedback button:hover{border-color:var(--bk-primary);color:var(--bk-primary)}
 @media(max-width:760px){.hero{grid-template-columns:1fr;padding:8vh 24px 120px}.topic-grid{display:none}.demo-header{padding:0 22px}.bk-panel{right:14px;bottom:90px;height:calc(100dvh - 110px);border-radius:20px}.bk-launcher{right:16px;bottom:16px}.bk-launcher-label{display:none}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;scroll-behavior:auto!important;transition:none!important}}
+.bk-send{font-size:14px;line-height:1;display:grid;place-items:center;padding:0}
 
