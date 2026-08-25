@@ -8,6 +8,7 @@ for (const file of [
   "../public/data/official-faq.js",
   "../public/data/verified-policy.js",
   "../public/data/qna-import.js",
+  ...Array.from({ length: 21 }, (_, index) => `../public/data/qna-data-${String(index + 1).padStart(2, "0")}.js`),
   "../public/data/knowledge-base.js"
 ]) {
   const source = await readFile(new URL(file, import.meta.url), "utf8");
