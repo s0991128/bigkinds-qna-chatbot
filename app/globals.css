@@ -136,6 +136,9 @@ button { -webkit-tap-highlight-color: transparent; }
 .user .bubble { border: 0; border-radius: 17px 7px 17px 17px; background: var(--blue-600); color: white; box-shadow: 0 7px 16px rgba(20,92,219,.18); }
 .bubble p { margin: 0; white-space: pre-line; word-break: keep-all; font-size: 13px; line-height: 1.65; }
 .answer-label { display: inline-flex; margin: 0 0 8px; padding: 4px 7px; border-radius: 6px; background: var(--blue-100); color: #1859bf; font-size: 10px; font-weight: 800; }
+.answer-facts, .answer-steps { margin: 10px 0 0; padding-left: 18px; color: #4e5d72; font-size: 11px; line-height: 1.65; }
+.answer-facts li::marker { color: var(--blue-500); }
+.answer-steps li::marker { color: var(--blue-500); font-weight: 800; }
 
 .answer-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 2px 0; }
 .answer-meta > a { color: #4e6f9c; text-decoration: none; font-size: 10px; font-weight: 720; }

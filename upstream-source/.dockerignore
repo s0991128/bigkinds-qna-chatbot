@@ -1,0 +1,6 @@
+.git
+work
+outputs
+node_modules
+npm-debug.log
+

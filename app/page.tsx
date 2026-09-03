@@ -2,7 +2,13 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { FAQ_SOURCE_URL, faqItems } from "../lib/faq";
-import { searchFaq } from "../lib/search";
+import { searchFaq, SearchableDocument } from "../lib/search";
+
+declare global {
+  interface Window {
+    BIGKINDS_KNOWLEDGE_BASE?: { documents?: SearchableDocument[]; updatedAt?: string };
+  }
+}
 
 type Message = {
   id: number;
@@ -27,22 +33,71 @@ const starterQuestions = [
 
 const categoryPrompts = [
   { label: "뉴스 검색", question: "검색조건의 기본값을 알려줘" },
-  { label: "분석 기능", question: "관계도 분석은 몇 건을 분석해?" },
-  { label: "다운로드", question: "기사 본문 전체를 다운로드할 수 있어?" },
-  { label: "오류 해결", question: "사이트에서 오류가 나면 어떻게 해?" },
+  { label: "Open API", question: "Open API 신청과 사용 방법을 알려줘" },
+  { label: "요금·정책", question: "API 이용요금과 정책이 궁금해" },
+  { label: "개인정보", question: "비밀번호나 인증키를 입력해도 돼?" },
 ];
+
+const dataScriptPaths = [
+  "/data/config.js",
+  "/data/official-faq.js",
+  "/data/verified-policy.js",
+  "/data/qna-import.js",
+  ...Array.from({ length: 21 }, (_, index) => `/data/qna-data-${String(index + 1).padStart(2, "0")}.js`),
+  "/data/knowledge-base.js",
+];
+
+function loadScript(path: string) {
+  return new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = path;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`데이터를 불러오지 못했습니다: ${path}`));
+    document.head.appendChild(script);
+  });
+}
+
+function normalizeKnowledgeDocument(document: SearchableDocument): SearchableDocument {
+  return {
+    ...document,
+    question: document.question || document.title || document.questions?.[0] || "공식 안내",
+    category: document.category || "기타",
+    keywords: document.keywords || [],
+    answer: document.answer || "공식 답변을 확인해 주세요.",
+  };
+}
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([welcomeMessage]);
   const [query, setQuery] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [embedded, setEmbedded] = useState(false);
+  const [knowledge, setKnowledge] = useState<SearchableDocument[]>(faqItems);
+  const [dataReady, setDataReady] = useState(false);
   const [feedback, setFeedback] = useState<Record<number, "up" | "down">>({});
   const nextId = useRef(2);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setEmbedded(new URLSearchParams(window.location.search).get("embed") === "1");
+
+    let cancelled = false;
+    (async () => {
+      try {
+        for (const path of dataScriptPaths) await loadScript(path);
+        const documents = window.BIGKINDS_KNOWLEDGE_BASE?.documents ?? [];
+        if (!cancelled && documents.length) {
+          setKnowledge(documents.map(normalizeKnowledgeDocument));
+          setDataReady(true);
+        }
+      } catch {
+        if (!cancelled) setDataReady(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -52,6 +107,11 @@ export default function Home() {
   const answeredCount = useMemo(
     () => messages.filter((message) => message.role === "assistant" && message.matchedId).length,
     [messages],
+  );
+
+  const faqCount = useMemo(
+    () => knowledge.filter((item) => item.id.startsWith("official-faq-")).length || 23,
+    [knowledge],
   );
 
   function ask(question: string) {
@@ -69,8 +129,13 @@ export default function Home() {
     setIsTyping(true);
 
     window.setTimeout(() => {
-      const results = searchFaq(cleanQuestion, 3);
-      const best = results[0];
+      const sensitive = /주민등록번호|비밀번호|인증키|api\s*key|apikey/i.test(cleanQuestion);
+      const results = searchFaq(cleanQuestion, 3, knowledge);
+      const privacyDocument = knowledge.find((item) => item.id === "privacy-security");
+      const safeResults = sensitive && privacyDocument
+        ? [{ item: privacyDocument, score: 999 }]
+        : results;
+      const best = safeResults[0];
       const assistantId = nextId.current++;
 
       if (!best) {
@@ -91,7 +156,7 @@ export default function Home() {
             role: "assistant",
             text: best.item.answer,
             matchedId: best.item.id,
-            relatedIds: results.slice(1).map((result) => result.item.id),
+            relatedIds: safeResults.slice(1).map((result) => result.item.id),
           },
         ]);
       }
@@ -144,8 +209,8 @@ export default function Home() {
                 출처를 함께 제공합니다.
               </p>
               <div className="metric-row" aria-label="프로토타입 특징">
-                <div><strong>23</strong><span>공식 FAQ</span></div>
-                <div><strong>3단계</strong><span>검색·답변·출처</span></div>
+              <div><strong>{faqCount}</strong><span>공식 FAQ</span></div>
+                <div><strong>{knowledge.length}</strong><span>검색 문서</span></div>
                 <div><strong>0건</strong><span>기사 본문 저장</span></div>
               </div>
               <div className="trust-note">
@@ -171,7 +236,7 @@ export default function Home() {
             <span className="bot-avatar">B</span>
             <div>
               <strong>빅카인즈 이용 도우미</strong>
-              <span><i /> 공식 FAQ 23건 연결</span>
+              <span><i /> {dataReady ? `${faqCount} FAQ · ${knowledge.length - faqCount} 정책/Q&A` : "공식 FAQ 연결 중"}</span>
             </div>
           </div>
           <div className="header-actions">
@@ -196,10 +261,10 @@ export default function Home() {
           <div className="day-divider"><span>오늘</span></div>
           {messages.map((message, index) => {
             const matched = message.matchedId
-              ? faqItems.find((item) => item.id === message.matchedId)
+              ? knowledge.find((item) => item.id === message.matchedId)
               : undefined;
             const related = (message.relatedIds ?? [])
-              .map((id) => faqItems.find((item) => item.id === id))
+              .map((id) => knowledge.find((item) => item.id === id))
               .filter(Boolean);
 
             return (
@@ -209,12 +274,22 @@ export default function Home() {
                   <div className="bubble">
                     {matched && <span className="answer-label">{matched.category}</span>}
                     <p>{message.text}</p>
+                    {matched?.facts && matched.facts.length > 0 && (
+                      <ul className="answer-facts">
+                        {matched.facts.slice(0, 5).map((fact) => <li key={fact}>{fact}</li>)}
+                      </ul>
+                    )}
+                    {matched?.steps && matched.steps.length > 0 && (
+                      <ol className="answer-steps">
+                        {matched.steps.slice(0, 5).map((step) => <li key={step}>{step}</li>)}
+                      </ol>
+                    )}
                   </div>
 
                   {matched && (
                     <div className="answer-meta">
-                      <a href={FAQ_SOURCE_URL} target="_blank" rel="noreferrer">
-                        공식 FAQ에서 확인 <span aria-hidden="true">↗</span>
+                      <a href={matched?.source?.url ?? FAQ_SOURCE_URL} target="_blank" rel="noreferrer">
+                        {matched?.source?.label ?? "공식 FAQ에서 확인"} <span aria-hidden="true">↗</span>
                       </a>
                       <div className="feedback" aria-label="답변 평가">
                         <span>도움이 됐나요?</span>
@@ -247,7 +322,7 @@ export default function Home() {
                   {(related.length > 0 || message.isFallback) && (
                     <div className="related-list">
                       <span>{message.isFallback ? "이런 주제는 답할 수 있어요" : "함께 볼 질문"}</span>
-                      {(message.isFallback ? faqItems.slice(6, 9) : related).map((item) => item && (
+                      {(message.isFallback ? knowledge.slice(6, 9) : related).map((item) => item && (
                         <button key={item.id} type="button" onClick={() => ask(item.question)}>
                           {item.question}
                         </button>
