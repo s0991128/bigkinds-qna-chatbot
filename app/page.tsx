@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { FAQ_SOURCE_URL, faqItems } from "../lib/faq";
 import { searchFaq, SearchableDocument } from "../lib/search";
+import { CHAT_HISTORY_KEY, formatAnswer } from "../lib/answer-format";
 
 declare global {
   interface Window {
@@ -55,6 +56,16 @@ function loadScript(path: string) {
     script.onerror = () => reject(new Error(`데이터를 불러오지 못했습니다: ${path}`));
     document.head.appendChild(script);
   });
+}
+
+function saveHistory(question: string, answer: string, item: SearchableDocument) {
+  try {
+    const current = JSON.parse(window.localStorage.getItem(CHAT_HISTORY_KEY) || "[]");
+    const next = [{ id: `${Date.now()}-${item.id}`, question, answer, category: item.category,
+      sourceLabel: item.source?.label, sourceUrl: item.source?.url ?? FAQ_SOURCE_URL,
+      createdAt: new Date().toISOString() }, ...current].slice(0, 100);
+    window.localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(next));
+  } catch { /* 저장이 차단된 환경에서도 답변은 계속 제공합니다. */ }
 }
 
 function normalizeKnowledgeDocument(document: SearchableDocument): SearchableDocument {
@@ -154,11 +165,12 @@ export default function Home() {
           {
             id: assistantId,
             role: "assistant",
-            text: best.item.answer,
+            text: formatAnswer(best.item.answer),
             matchedId: best.item.id,
             relatedIds: safeResults.slice(1).map((result) => result.item.id),
           },
         ]);
+        saveHistory(cleanQuestion, best.item.answer, best.item);
       }
 
       setIsTyping(false);
@@ -194,7 +206,7 @@ export default function Home() {
             </a>
             <div className="header-context">
               <span className="service-badge">공식 이용 안내</span>
-              <span className="header-date">Q&amp;A 도우미</span>
+              <a className="header-date history-link" href="/history">대화 기록 보기&nbsp;↗</a>
             </div>
           </header>
 
