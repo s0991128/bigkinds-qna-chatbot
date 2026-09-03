@@ -107,6 +107,9 @@ button { -webkit-tap-highlight-color: transparent; }
   background: var(--surface);
   box-shadow: 0 30px 90px rgba(15, 34, 61, .24), 0 4px 18px rgba(15, 34, 61, .10);
 }
+.page-launcher { position: fixed; right: clamp(18px, 2.5vw, 38px); bottom: clamp(18px, 2.5vw, 36px); z-index: 25; width: 62px; height: 62px; display: grid; place-items: center; border: 0; border-radius: 21px; background: linear-gradient(145deg, #2875ed, #104db9); color: white; box-shadow: 0 16px 38px rgba(16,64,145,.32); cursor: pointer; font-size: 25px; font-weight: 900; transition: transform .2s, box-shadow .2s; }
+.page-launcher:hover { transform: translateY(-3px); box-shadow: 0 20px 44px rgba(16,64,145,.38); }
+.page-launcher span { position: absolute; top: 2px; right: 2px; width: 12px; height: 12px; border: 2px solid white; border-radius: 50%; background: #35c77d; }
 
 .embedded { min-height: 100vh; background: transparent; }
 .embedded .chat-widget { inset: 0; width: 100%; height: 100%; max-height: none; min-height: 0; border: 0; border-radius: 0; box-shadow: none; }
@@ -222,6 +225,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
   .metric-row { gap: 20px; flex-wrap: wrap; }
   .trust-note { align-items: flex-start; }
   .chat-widget { right: 12px; bottom: 12px; width: calc(100vw - 24px); height: min(630px, calc(100vh - 92px)); border-radius: 22px; }
+  .page-launcher { right: 14px; bottom: 14px; width: 58px; height: 58px; border-radius: 19px; }
 }
 
 @media (max-height: 680px) and (min-width: 761px) {

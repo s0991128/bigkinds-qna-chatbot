@@ -83,6 +83,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [embedded, setEmbedded] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [knowledge, setKnowledge] = useState<SearchableDocument[]>(faqItems);
   const [dataReady, setDataReady] = useState(false);
   const [feedback, setFeedback] = useState<Record<number, "up" | "down">>({});
@@ -90,7 +91,9 @@ export default function Home() {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setEmbedded(new URLSearchParams(window.location.search).get("embed") === "1");
+    const isEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
+    setEmbedded(isEmbed);
+    setChatOpen(isEmbed);
 
     let cancelled = false;
     (async () => {
@@ -239,7 +242,7 @@ export default function Home() {
         </>
       )}
 
-      <section className="chat-widget" aria-label="빅카인즈 이용 도우미">
+      {(embedded || chatOpen) && <section className="chat-widget" aria-label="빅카인즈 이용 도우미">
         <header className="chat-header">
           <div className="bot-identity">
             <span className="bot-avatar">B</span>
@@ -252,9 +255,7 @@ export default function Home() {
             {answeredCount > 0 && (
               <button className="icon-button reset-button" type="button" onClick={resetConversation} aria-label="대화 초기화" title="대화 초기화">↻</button>
             )}
-            {embedded && (
-              <button className="icon-button" type="button" onClick={closeWidget} aria-label="챗봇 닫기">×</button>
-            )}
+            <button className="icon-button" type="button" onClick={() => embedded ? closeWidget() : setChatOpen(false)} aria-label="챗봇 닫기">×</button>
           </div>
         </header>
 
@@ -367,7 +368,12 @@ export default function Home() {
           </div>
           <p>FAQ 기반 자동 답변입니다. 중요한 내용은 공식 원문을 확인해 주세요.</p>
         </form>
-      </section>
+      </section>}
+      {!embedded && !chatOpen && (
+        <button className="page-launcher" type="button" onClick={() => setChatOpen(true)} aria-label="빅카인즈 이용 도우미 열기">
+          B<span aria-hidden="true" />
+        </button>
+      )}
     </main>
   );
 }
