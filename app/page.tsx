@@ -192,21 +192,19 @@ export default function Home() {
                 <small>뉴스빅데이터 분석서비스</small>
               </span>
             </a>
-            <nav aria-label="미리보기 메뉴">
-              <span>뉴스분석</span>
-              <span>뉴스보기</span>
-              <span>빅카인즈 활용</span>
-              <span>서비스 안내</span>
-            </nav>
+            <div className="header-context">
+              <span className="service-badge">공식 이용 안내</span>
+              <span className="header-date">Q&amp;A 도우미</span>
+            </div>
           </header>
 
           <section className="demo-content">
             <div className="demo-copy">
-              <p className="section-label">FAQ CHATBOT PROTOTYPE</p>
-              <h1>질문은 자연스럽게.<br />답변은 공식 근거로.</h1>
+              <p className="section-label">BIG KINDS · 이용 Q&amp;A</p>
+              <h1>빅카인즈 이용,<br />필요한 답부터 찾으세요.</h1>
               <p className="lead">
-                공식 FAQ 23건을 찾아 핵심만 설명하고, 사용자가 원문을 다시 확인할 수 있도록
-                출처를 함께 제공합니다.
+                검색·Open API·데이터 이용 방법을 공식 안내와 Q&amp;A에서 찾아
+                이해하기 쉬운 답변으로 정리해 드립니다.
               </p>
               <div className="metric-row" aria-label="프로토타입 특징">
               <div><strong>{faqCount}</strong><span>공식 FAQ</span></div>
@@ -215,16 +213,15 @@ export default function Home() {
               </div>
               <div className="trust-note">
                 <span aria-hidden="true">✓</span>
-                <p><strong>답변 범위를 제한했습니다.</strong> FAQ에 근거가 없으면 모른다고 안내합니다.</p>
+                <p><strong>공식 자료를 우선합니다.</strong> 근거가 없으면 추측하지 않습니다.</p>
               </div>
             </div>
 
             <aside className="flow-card" aria-label="답변 생성 흐름">
-              <p>이용자 질문</p>
-              <span>↓ 의도·핵심어 분석</span>
-              <p>공식 FAQ 검색</p>
-              <span>↓ 관련도 기준 선택</span>
-              <p>자연어 답변 + 출처</p>
+              <div className="flow-heading">답변 원칙</div>
+              <p><b>01</b><span>질문의 핵심어를 파악합니다</span></p>
+              <p><b>02</b><span>공식 FAQ·정책을 대조합니다</span></p>
+              <p><b>03</b><span>절차와 출처를 함께 안내합니다</span></p>
             </aside>
           </section>
         </>

@@ -22,7 +22,7 @@ test("server-renders the BIGKinds chatbot shell", async () => {
   const html = await response.text();
   assert.match(html, /빅카인즈 이용 도우미/);
   assert.match(html, /공식 FAQ 23건/);
-  assert.match(html, /질문은 자연스럽게/);
+  assert.match(html, /필요한 답부터 찾으세요/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
