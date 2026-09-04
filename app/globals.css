@@ -113,6 +113,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .embedded { min-height: 100vh; background: transparent; }
 .embedded .chat-widget { inset: 0; width: 100%; height: 100%; max-height: none; min-height: 0; border: 0; border-radius: 0; box-shadow: none; }
+.site.standalone .chat-widget { inset: 0; width: 100%; height: 100dvh; max-height: none; min-height: 0; border: 0; border-radius: 0; box-shadow: none; }
 
 .chat-header { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; background: var(--navy-900); color: white; }
 .bot-identity { display: flex; align-items: center; gap: 11px; min-width: 0; }
@@ -152,6 +153,10 @@ button { -webkit-tap-highlight-color: transparent; }
 .answer-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 2px 0; }
 .answer-meta > a { color: #4e6f9c; text-decoration: none; font-size: 10px; font-weight: 720; }
 .answer-meta > a:hover { color: var(--blue-600); text-decoration: underline; }
+.source-meta { display: grid; gap: 3px; min-width: 0; }
+.source-meta a { color: #285fae; text-decoration: none; font-size: 10px; font-weight: 800; }
+.source-meta a:hover { color: var(--blue-600); text-decoration: underline; }
+.source-meta span { overflow: hidden; color: #8b96a6; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .feedback { display: flex; align-items: center; gap: 3px; color: #929cab; font-size: 9px; }
 .feedback button { width: 21px; height: 21px; display: grid; place-items: center; border: 1px solid #d9e0e9; border-radius: 7px; background: white; color: #6f7b8d; cursor: pointer; font-size: 14px; }
 .feedback button.selected { border-color: #8ab0ee; background: var(--blue-100); color: var(--blue-600); }
