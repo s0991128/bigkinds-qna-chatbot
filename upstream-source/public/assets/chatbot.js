@@ -16,13 +16,18 @@
       "'": "&#39;"
     })[ch]);
 
-  const answerText = (value) => esc(String(value ?? "").replace(/¶/g, "\n"));
+  const answerText = (value) => {
+    const text = String(value ?? "").replace(/쨋/g, "\n").trim();
+    const paragraphs = text.split(/\n{2,}/).filter(Boolean);
+    const compact = paragraphs.slice(0, 2).join("\n\n");
+    return esc(compact.length <= 520 ? compact : `${compact.slice(0, 517).trimEnd()}...`);
+  };
 
   const normalize = (value) =>
     String(value)
       .toLowerCase()
       .normalize("NFKC")
-      .replace(/[^0-9a-z가-힣\s]/g, " ")
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -104,10 +109,10 @@
     const source = doc.source?.url
       ? `<a href="${esc(doc.source.url)}" target="_blank" rel="noopener">${label}</a>`
       : label;
-    const pages = doc.source?.pages ? ` · ${esc(doc.source.pages)}` : "";
-    return `<div class="bk-meta">근거 · ${source}${pages}<br>기준일 · ${esc(
+    const pages = doc.source?.pages ? ` 쨌 ${esc(doc.source.pages)}` : "";
+    return `<div class="bk-meta">洹쇨굅 쨌 ${source}${pages}<br>湲곗???쨌 ${esc(
       doc.effectiveDate || kb.updatedAt
-    )}${doc.requiresReview ? " · <strong>검토 필요</strong>" : ""}</div>`;
+    )}${doc.requiresReview ? " 쨌 <strong>寃???꾩슂</strong>" : ""}</div>`;
   }
 
   function answerFromKb(question) {
@@ -117,11 +122,11 @@
     if (hasSensitive(question)) {
       const safe = kb.documents.find((doc) => doc.id === "privacy-security");
       return {
-        html: `<strong>${esc(safe?.title || "민감 정보 입력 주의")}</strong><br>${answerText(
+        html: `<strong>${esc(safe?.title || "誘쇨컧 ?뺣낫 ?낅젰 二쇱쓽")}</strong><br>${answerText(
           safe?.answer || config.privacy.warning
         )}${sourceHtml(safe)}`,
         escalate: true,
-        category: "개인정보·보안",
+        category: "媛쒖씤?뺣낫쨌蹂댁븞",
         confidence: 1,
         doc: safe
       };
@@ -129,23 +134,17 @@
 
     if (!top || top.score < (config.search?.minConfidence ?? 0.2)) {
       return {
-        html: "공식 자료에서 바로 확인되는 답을 찾지 못했습니다. 질문을 조금 더 구체적으로 적어 주시거나 담당자 안내가 필요합니다.",
+        html: "怨듭떇 ?먮즺?먯꽌 諛붾줈 ?뺤씤?섎뒗 ?듭쓣 李얠? 紐삵뻽?듬땲?? 吏덈Ц??議곌툑 ??援ъ껜?곸쑝濡??곸뼱 二쇱떆嫄곕굹 ?대떦???덈궡媛 ?꾩슂?⑸땲??",
         escalate: true,
-        category: "기타",
+        category: "湲고?",
         confidence: top?.score || 0
       };
     }
 
     const doc = top.doc;
-    const steps = (doc.steps || []).length
-      ? `<ol class="bk-steps">${doc.steps.map((item) => `<li>${esc(item)}</li>`).join("")}</ol>`
-      : "";
-    const facts = (doc.facts || []).length
-      ? `<ul class="bk-steps">${doc.facts.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`
-      : "";
 
     return {
-      html: `<strong>${esc(doc.title)}</strong><br>${answerText(doc.answer)}${facts}${steps}${sourceHtml(doc)}`,
+      html: `<strong>${esc(doc.title)}</strong><br>${answerText(doc.answer)}${sourceHtml(doc)}`,
       escalate: shouldEscalate(question, top),
       category: doc.category,
       confidence: top.score,
@@ -196,37 +195,32 @@
   }
 
   function feedbackHtml(docId) {
-    return `<div class="bk-feedback"><span>도움이 되었나요?</span><button type="button" data-feedback="helpful" data-doc-id="${esc(
+    return `<div class="bk-feedback"><span>?꾩????섏뿀?섏슂?</span><button type="button" data-feedback="helpful" data-doc-id="${esc(
       docId || "unknown"
-    )}">예</button><button type="button" data-feedback="unhelpful" data-doc-id="${esc(
+    )}">??/button><button type="button" data-feedback="unhelpful" data-doc-id="${esc(
       docId || "unknown"
-    )}">아니요</button></div>`;
+    )}">?꾨땲??/button></div>`;
   }
 
   function escalationHtml(question, category) {
     const item = config.escalation || {};
-    const payload = `질문 유형: ${category}\n질문: ${question}\n작성 시각: ${new Date().toLocaleString(
-      "ko-KR"
-    )}`;
     const purchase = item.purchaseRequestUrl
       ? `<a class="bk-action" href="${esc(item.purchaseRequestUrl)}" target="_blank" rel="noopener">${esc(
-          item.purchaseRequestLabel || "구매 요청"
+          item.purchaseRequestLabel || "援щℓ ?붿껌"
         )}</a>`
       : "";
     const contact = item.contactUrl
       ? `<a class="bk-action" href="${esc(item.contactUrl)}" target="_blank" rel="noopener">${esc(
-          item.contactLabel || "문의하기"
+          item.contactLabel || "臾몄쓽?섍린"
         )}</a>`
       : "";
     const phone = item.phone
-      ? `<div class="bk-contact">전화 · ${esc(item.phone)} · ${esc(item.businessHours || "")}</div>`
+      ? `<div class="bk-contact">?꾪솕 쨌 ${esc(item.phone)} 쨌 ${esc(item.businessHours || "")}</div>`
       : "";
 
-    return `<div class="bk-escalate"><strong>${esc(item.label || "담당자 이관")}</strong><br>${esc(
+    return `<div class="bk-escalate"><strong>${esc(item.label || "?대떦???닿?")}</strong><br>${esc(
       item.message || ""
-    )}${phone}<div class="bk-actions"><button class="bk-action" type="button" data-copy="${esc(
-      payload
-    )}">문의 정보 복사</button>${contact}${purchase}</div></div>`;
+    )}${phone}<div class="bk-actions">${contact}${purchase}</div></div>`;
   }
 
   function emit(name, detail) {
@@ -259,7 +253,7 @@
 
     conversation.push({
       role: "assistant",
-      content: ai?.answer || fallback.doc?.answer || "답변 완료"
+      content: ai?.answer || fallback.doc?.answer || "?듬? ?꾨즺"
     });
 
     emit("answer", {
@@ -277,8 +271,8 @@
     root.style.setProperty("--bk-accent", config.theme?.accent || "#18a77b");
 
     root.innerHTML = `
-      <button class="bk-launcher" type="button" aria-label="${esc(config.serviceName)} 열기" aria-expanded="false">
-        <span class="bk-launcher-label">궁금한 내용을 물어보세요</span>
+      <button class="bk-launcher" type="button" aria-label="${esc(config.serviceName)} ?닿린" aria-expanded="false">
+        <span class="bk-launcher-label">沅곴툑???댁슜??臾쇱뼱蹂댁꽭??/span>
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M5 5.8A2.8 2.8 0 0 1 7.8 3h8.4A2.8 2.8 0 0 1 19 5.8v5.4a2.8 2.8 0 0 1-2.8 2.8h-5.7L6 18v-4.2a2.8 2.8 0 0 1-1-2.1V5.8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"></path>
           <path d="M8.5 8.5h7M8.5 11h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
@@ -289,9 +283,9 @@
           <span class="bk-avatar">B</span>
           <span class="bk-head-copy">
             <strong>${esc(config.assistantName)}</strong>
-            <span>공식 자료 검색형 안내</span>
+            <span>怨듭떇 ?먮즺 寃?됲삎 ?덈궡</span>
           </span>
-          <button class="bk-close" type="button" aria-label="챗봇 닫기">×</button>
+          <button class="bk-close" type="button" aria-label="梨쀫큸 ?リ린">횞</button>
         </header>
         <div class="bk-notice">${esc(config.notice || "")}</div>
         <div class="bk-messages" aria-live="polite"></div>
@@ -303,8 +297,8 @@
         <form class="bk-compose">
           <p class="bk-privacy">${esc(config.privacy?.warning || "")}</p>
           <div class="bk-input-row">
-            <textarea class="bk-input" rows="1" maxlength="500" placeholder="질문을 입력하세요" aria-label="질문"></textarea>
-            <button class="bk-send" type="submit" aria-label="질문 보내기">전송</button>
+            <textarea class="bk-input" rows="1" maxlength="500" placeholder="吏덈Ц???낅젰?섏꽭?? aria-label="吏덈Ц"></textarea>
+            <button class="bk-send" type="submit" aria-label="吏덈Ц 蹂대궡湲?>?꾩넚</button>
           </div>
         </form>
       </section>
@@ -352,17 +346,17 @@
         navigator.clipboard
           .writeText(copy.dataset.copy)
           .then(() => {
-            copy.textContent = "복사 완료";
+            copy.textContent = "蹂듭궗 ?꾨즺";
           })
           .catch(() => {
-            copy.textContent = "복사 실패";
+            copy.textContent = "蹂듭궗 ?ㅽ뙣";
           });
         return;
       }
 
       const feedback = event.target.closest("[data-feedback]");
       if (feedback) {
-        feedback.parentElement.innerHTML = "<span>의견 감사합니다.</span>";
+        feedback.parentElement.innerHTML = "<span>?섍껄 媛먯궗?⑸땲??</span>";
         emit("feedback", {
           value: feedback.dataset.feedback,
           documentId: feedback.dataset.docId
@@ -394,4 +388,6 @@
     mount();
   }
 })();
+
+
 
