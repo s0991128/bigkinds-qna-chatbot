@@ -111,7 +111,7 @@ export default function Home() {
   useEffect(() => {
     const isEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
     setEmbedded(isEmbed);
-    setChatOpen(true);
+    setChatOpen(isEmbed);
 
     let cancelled = false;
     (async () => {
@@ -213,7 +213,7 @@ export default function Home() {
   }
 
   return (
-    <main className={embedded ? "site embedded" : chatOpen ? "site standalone" : "site"}>
+    <main className={embedded ? "site embedded" : "site"}>
       {!embedded && !chatOpen && (
         <>
           <div className="gov-strip">이 화면은 빅카인즈 웹사이트 부착형 챗봇의 구현 예시입니다.</div>
@@ -388,4 +388,3 @@ export default function Home() {
     </main>
   );
 }
-
