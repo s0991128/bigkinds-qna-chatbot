@@ -77,6 +77,24 @@ function normalizeKnowledgeDocument(document: SearchableDocument): SearchableDoc
     answer: document.answer || "공식 답변을 확인해 주세요.",
   };
 }
+function conciseAnswer(value: string) {
+  const paragraphs = formatAnswer(value)
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  const compact = paragraphs.slice(0, 2).join("\n\n");
+  if (compact.length <= 520) return compact;
+
+  const sentences = compact.match(/[^.!?。！？]+[.!?。！？]+/g) ?? [compact];
+  let result = "";
+  for (const sentence of sentences) {
+    if (result && result.length + sentence.length > 520) break;
+    result += sentence;
+    if (result.length >= 300) break;
+  }
+  return result.trim() || `${compact.slice(0, 517).trimEnd()}...`;
+}
+
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([welcomeMessage]);
@@ -93,7 +111,7 @@ export default function Home() {
   useEffect(() => {
     const isEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
     setEmbedded(isEmbed);
-    setChatOpen(isEmbed);
+    setChatOpen(true);
 
     let cancelled = false;
     (async () => {
@@ -168,7 +186,7 @@ export default function Home() {
           {
             id: assistantId,
             role: "assistant",
-            text: formatAnswer(best.item.answer),
+            text: conciseAnswer(best.item.answer),
             matchedId: best.item.id,
             relatedIds: safeResults.slice(1).map((result) => result.item.id),
           },
@@ -195,8 +213,8 @@ export default function Home() {
   }
 
   return (
-    <main className={embedded ? "site embedded" : "site"}>
-      {!embedded && (
+    <main className={embedded ? "site embedded" : chatOpen ? "site standalone" : "site"}>
+      {!embedded && !chatOpen && (
         <>
           <div className="gov-strip">이 화면은 빅카인즈 웹사이트 부착형 챗봇의 구현 예시입니다.</div>
           <header className="site-header">
@@ -284,23 +302,16 @@ export default function Home() {
                   <div className="bubble">
                     {matched && <span className="answer-label">{matched.category}</span>}
                     <p>{message.text}</p>
-                    {matched?.facts && matched.facts.length > 0 && (
-                      <ul className="answer-facts">
-                        {matched.facts.slice(0, 5).map((fact) => <li key={fact}>{fact}</li>)}
-                      </ul>
-                    )}
-                    {matched?.steps && matched.steps.length > 0 && (
-                      <ol className="answer-steps">
-                        {matched.steps.slice(0, 5).map((step) => <li key={step}>{step}</li>)}
-                      </ol>
-                    )}
                   </div>
 
                   {matched && (
                     <div className="answer-meta">
+                      <div className="source-meta">
                       <a href={matched?.source?.url ?? FAQ_SOURCE_URL} target="_blank" rel="noreferrer">
-                        {matched?.source?.label ?? "공식 FAQ에서 확인"} <span aria-hidden="true">↗</span>
+                        공식 근거 확인 ↗
                       </a>
+                      <span>{matched?.source?.label ?? "빅카인즈 공식 FAQ"}{matched?.source?.pages ? ` · ${matched.source.pages}` : ""}</span>
+                    </div>
                       <div className="feedback" aria-label="답변 평가">
                         <span>도움이 됐나요?</span>
                         <button
@@ -377,3 +388,4 @@ export default function Home() {
     </main>
   );
 }
+
