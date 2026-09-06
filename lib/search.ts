@@ -10,6 +10,10 @@ export type SearchableDocument = FaqItem & {
   source?: { label?: string; url?: string; pages?: string };
   facts?: string[];
   steps?: string[];
+  authority?: "CURRENT_POLICY" | "OFFICIAL_FAQ" | "OFFICIAL_INTRO" | "VERIFIED_QNA" | "HISTORICAL_QNA";
+  status?: "CURRENT" | "REVIEW_REQUIRED" | "SUPERSEDED";
+  reviewedAt?: string;
+  supersededBy?: string;
 };
 
 export type SearchResult = { item: SearchableDocument; score: number };
@@ -78,9 +82,20 @@ export function searchFaq(query: string, limit = 3, documents: SearchableDocumen
         if (answer.includes(term)) score += 1;
       });
 
+      const authorityWeight: Record<NonNullable<SearchableDocument["authority"]>, number> = {
+        CURRENT_POLICY: 6,
+        OFFICIAL_FAQ: 5,
+        OFFICIAL_INTRO: 4,
+        VERIFIED_QNA: 2,
+        HISTORICAL_QNA: 0,
+      };
+      if (score > 0) score += authorityWeight[item.authority ?? "HISTORICAL_QNA"];
+      if (item.status === "REVIEW_REQUIRED") score -= 1;
+      if (item.status === "SUPERSEDED") score -= 100;
+
       return { item, score };
     })
-    .filter((result) => result.score >= 4)
+    .filter((result) => result.score >= 4 && result.item.status !== "SUPERSEDED")
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 }

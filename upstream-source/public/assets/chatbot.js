@@ -18,9 +18,7 @@
 
   const answerText = (value) => {
     const text = String(value ?? "").replace(/¶/g, "\n").trim();
-    const paragraphs = text.split(/\n{2,}/).filter(Boolean);
-    const compact = paragraphs.slice(0, 2).join("\n\n");
-    return esc(compact.length <= 520 ? compact : `${compact.slice(0, 517).trimEnd()}...`);
+    return esc(text);
   };
 
   const normalize = (value) =>
@@ -110,9 +108,10 @@
       ? `<a href="${esc(doc.source.url)}" target="_blank" rel="noopener">${label}</a>`
       : label;
     const pages = doc.source?.pages ? ` · ${esc(doc.source.pages)}` : "";
-    return `<div class="bk-meta">근거 · ${source}${pages}<br>기준일 · ${esc(
-      doc.effectiveDate || kb.updatedAt
-    )}${doc.requiresReview ? " · <strong>검토 필요</strong>" : ""}</div>`;
+    const authority = { CURRENT_POLICY: "현행 정책", OFFICIAL_FAQ: "공식 FAQ", OFFICIAL_INTRO: "공식 소개", VERIFIED_QNA: "검증된 Q&A", HISTORICAL_QNA: "과거 Q&A 참고" }[doc.authority] || "공식 자료";
+    return `<div class="bk-meta">근거 · ${source}${pages}<br>자료 유형 · ${authority}<br>기준일 · ${esc(
+      doc.effectiveDate || kb.updatedAt || "확인 필요"
+    )}${doc.requiresReview || doc.status === "REVIEW_REQUIRED" ? " · <strong>검토 필요</strong>" : ""}</div>`;
   }
 
   function answerFromKb(question) {

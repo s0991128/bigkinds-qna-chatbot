@@ -25,8 +25,8 @@ window.BIGKINDS_CHATBOT_CONFIG = {
     label: "담당자 안내",
     message:
       "요금·계약·권한 등 정확한 확인이 필요한 사항은 담당자에게 문의해 주세요.",
-    contactUrl: "https://www.newstore.or.kr/",
-    contactLabel: "빅카인즈 안내",
+    contactUrl: "https://www.bigkinds.or.kr/news/qnaList.do",
+    contactLabel: "공식 Q&A 문의",
     purchaseRequestUrl: "https://www.newstore.or.kr/store/prodct/newsdata/list.do",
     purchaseRequestLabel: "API 구매 요청",
     phone: "02-2001-7574",

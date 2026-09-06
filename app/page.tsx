@@ -4,6 +4,11 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { FAQ_SOURCE_URL, faqItems } from "../lib/faq";
 import { searchFaq, SearchableDocument } from "../lib/search";
 import { CHAT_HISTORY_KEY, formatAnswer } from "../lib/answer-format";
+import { buildAnswerViewModel, AnswerViewModel } from "../lib/answer-model";
+import { classifyPagePath, createPageContext, pageTypeLabels, PageContext, starterQuestionsByPage } from "../lib/page-context";
+import { buildSearchQuery, describeSearchQuery, SearchQueryInput } from "../lib/search-query-builder";
+import { detectDiagnosticKind, DiagnosticFlow, getDiagnosticFlow } from "../lib/diagnostic-flows";
+import { recordFeedback } from "../lib/feedback";
 
 declare global {
   interface Window {
@@ -18,12 +23,15 @@ type Message = {
   matchedId?: string;
   relatedIds?: string[];
   isFallback?: boolean;
+  answerModel?: AnswerViewModel;
+  diagnostic?: DiagnosticFlow;
+  question?: string;
 };
 
 const welcomeMessage: Message = {
   id: 1,
   role: "assistant",
-  text: "안녕하세요. 빅카인즈 공식 FAQ를 바탕으로 이용 방법을 안내해 드릴게요. 궁금한 내용을 편하게 물어보세요.",
+  text: "안녕하세요. 빅카인즈 공식 자료를 바탕으로 뉴스 검색·분석과 이용 방법을 안내해 드릴게요. 궁금한 내용을 편하게 물어보세요.",
 };
 
 const starterQuestions = [
@@ -49,6 +57,8 @@ const dataScriptPaths = [
   "/data/official-intro.js",
 ];
 
+const QNA_SOURCE_URL = "https://www.bigkinds.or.kr/news/qnaList.do";
+
 function loadScript(path: string) {
   return new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
@@ -70,12 +80,16 @@ function saveHistory(question: string, answer: string, item: SearchableDocument)
 }
 
 function normalizeKnowledgeDocument(document: SearchableDocument): SearchableDocument {
+  const authority = document.authority ?? (document.id.startsWith("official-faq-") ? "OFFICIAL_FAQ" : document.id.startsWith("bigkinds-intro-") ? "OFFICIAL_INTRO" : document.id.startsWith("qna-") ? "VERIFIED_QNA" : "CURRENT_POLICY");
+  const status = document.status ?? (document.id.startsWith("qna-") ? "REVIEW_REQUIRED" : "CURRENT");
   return {
     ...document,
     question: document.question || document.title || document.questions?.[0] || "공식 안내",
     category: document.category || "기타",
     keywords: document.keywords || [],
     answer: document.answer || "공식 답변을 확인해 주세요.",
+    authority,
+    status,
   };
 }
 
@@ -102,25 +116,6 @@ const knowledgeTypeMeta: Record<KnowledgeType, { label: string; description: str
   policy: { label: "정책·사용법", description: "API·저작권·이용 기준" },
 };
 
-function conciseAnswer(value: string) {
-  const paragraphs = formatAnswer(value)
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
-  const compact = paragraphs.slice(0, 2).join("\n\n");
-  if (compact.length <= 520) return compact;
-
-  const sentences = compact.match(/[^.!?。！？]+[.!?。！？]+/g) ?? [compact];
-  let result = "";
-  for (const sentence of sentences) {
-    if (result && result.length + sentence.length > 520) break;
-    result += sentence;
-    if (result.length >= 300) break;
-  }
-  return result.trim() || `${compact.slice(0, 517).trimEnd()}...`;
-}
-
-
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([welcomeMessage]);
   const [query, setQuery] = useState("");
@@ -132,6 +127,12 @@ export default function Home() {
   const [knowledge, setKnowledge] = useState<SearchableDocument[]>(faqItems);
   const [dataReady, setDataReady] = useState(false);
   const [feedback, setFeedback] = useState<Record<number, "up" | "down">>({});
+  const [feedbackReasons, setFeedbackReasons] = useState<Record<number, string>>({});
+  const [expandedMessages, setExpandedMessages] = useState<Record<number, boolean>>({});
+  const [pageContext, setPageContext] = useState<PageContext>(() => createPageContext("/"));
+  const [showQueryBuilder, setShowQueryBuilder] = useState(false);
+  const [queryBuilder, setQueryBuilder] = useState<SearchQueryInput>({ any: [], all: [], exact: [], exclude: [] });
+  const [queryBuilderText, setQueryBuilderText] = useState<Record<string, string>>({ any: "", all: "", exact: "", exclude: "" });
   const nextId = useRef(2);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -139,6 +140,19 @@ export default function Home() {
     const isEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
     setEmbedded(isEmbed);
     setChatOpen(isEmbed);
+    setPageContext(createPageContext(window.location.pathname));
+
+    const onContext = (event: MessageEvent) => {
+      if (event.source !== window.parent || !event.data || event.data.type !== "bigkinds-chatbot-context") return;
+      const incoming = event.data.context as Partial<PageContext>;
+      if (!incoming || typeof incoming.pathname !== "string") return;
+      setPageContext({
+        pathname: incoming.pathname,
+        pageType: incoming.pageType || classifyPagePath(incoming.pathname),
+        loggedIn: incoming.loggedIn ?? null,
+      });
+    };
+    window.addEventListener("message", onContext);
 
     let cancelled = false;
     (async () => {
@@ -156,6 +170,7 @@ export default function Home() {
 
     return () => {
       cancelled = true;
+      window.removeEventListener("message", onContext);
     };
   }, []);
 
@@ -207,11 +222,70 @@ export default function Home() {
     [selectedDocumentId, selectedDocuments],
   );
 
+  const contextualStarters = useMemo(
+    () => starterQuestionsByPage[pageContext.pageType] ?? starterQuestions,
+    [pageContext.pageType],
+  );
+
+  const contextLabel = pageTypeLabels[pageContext.pageType];
+
+  const builtSearchQuery = useMemo(() => buildSearchQuery(queryBuilder), [queryBuilder]);
+  const builtSearchDescription = useMemo(() => describeSearchQuery(queryBuilder), [queryBuilder]);
+
   function openKnowledgeGroup(group: KnowledgeGroup) {
     if (!dataReady || group.count === 0) return;
     setSelectedKnowledgeType(group.key);
     const firstDocument = knowledge.find((document) => getKnowledgeType(document) === group.key);
     setSelectedDocumentId(firstDocument?.id ?? null);
+  }
+
+  function emitHostAction(action: { type: string; label?: string; url?: string; value?: string }) {
+    const parentOrigin = document.referrer ? (() => { try { return new URL(document.referrer).origin; } catch { return ""; } })() : "";
+    window.parent.postMessage({ type: "bigkinds-chatbot-action", action }, parentOrigin || "*");
+  }
+
+  async function copyText(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+  }
+
+  function builderAdd(field: keyof SearchQueryInput) {
+    const value = (queryBuilderText[field] || "").trim();
+    if (!value) return;
+    setQueryBuilder((current) => ({ ...current, [field]: [...(current[field] || []), value] }));
+    setQueryBuilderText((current) => ({ ...current, [field]: "" }));
+  }
+
+  function builderRemove(field: keyof SearchQueryInput, index: number) {
+    setQueryBuilder((current) => ({ ...current, [field]: (current[field] || []).filter((_, itemIndex) => itemIndex !== index) }));
+  }
+
+  function applySearchQuery() {
+    if (!builtSearchQuery) return;
+    emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: builtSearchQuery });
+  }
+
+  function handleFeedback(messageId: number, value: "up" | "down") {
+    setFeedback((current) => ({ ...current, [messageId]: value }));
+    const message = messages.find((item) => item.id === messageId);
+    recordFeedback({ documentId: message?.matchedId, pageType: pageContext.pageType, rating: value });
+    if (value === "up") setFeedbackReasons((current) => { const next = { ...current }; delete next[messageId]; return next; });
+  }
+
+  function handleFeedbackReason(messageId: number, reason: string) {
+    setFeedbackReasons((current) => ({ ...current, [messageId]: reason }));
+    const message = messages.find((item) => item.id === messageId);
+    recordFeedback({ documentId: message?.matchedId, pageType: pageContext.pageType, rating: "down", reason });
   }
 
   function ask(question: string) {
@@ -228,6 +302,8 @@ export default function Home() {
     setQuery("");
     setIsTyping(true);
 
+    const diagnosticKind = detectDiagnosticKind(cleanQuestion, pageContext.pageType);
+
     window.setTimeout(() => {
       const sensitive = /주민등록번호|비밀번호|인증키|api\s*key|apikey/i.test(cleanQuestion);
       const results = searchFaq(cleanQuestion, 3, knowledge);
@@ -238,7 +314,12 @@ export default function Home() {
       const best = safeResults[0];
       const assistantId = nextId.current++;
 
-      if (!best) {
+      if (diagnosticKind && cleanQuestion.length < 40) {
+        setMessages((current) => [
+          ...current,
+          { id: assistantId, role: "assistant", text: getDiagnosticFlow(diagnosticKind).title, diagnostic: getDiagnosticFlow(diagnosticKind), question: cleanQuestion },
+        ]);
+      } else if (!best) {
         setMessages((current) => [
           ...current,
           {
@@ -246,17 +327,21 @@ export default function Home() {
             role: "assistant",
             text: "저장된 공식 문서에서 질문과 직접 관련된 내용을 찾지 못했어요. 이 챗봇은 빅카인즈 FAQ·정책·소개·Q&A 범위에서만 안내합니다. 질문을 조금 더 구체적으로 바꾸거나 관련 주제를 선택해 주세요.",
             isFallback: true,
+            question: cleanQuestion,
           },
         ]);
       } else {
+        const answerModel = buildAnswerViewModel(best.item);
         setMessages((current) => [
           ...current,
           {
             id: assistantId,
             role: "assistant",
-            text: conciseAnswer(best.item.answer),
+            text: answerModel.summary,
             matchedId: best.item.id,
             relatedIds: safeResults.slice(1).map((result) => result.item.id),
+            answerModel,
+            question: cleanQuestion,
           },
         ]);
         saveHistory(cleanQuestion, best.item.answer, best.item);
@@ -274,10 +359,13 @@ export default function Home() {
   function resetConversation() {
     setMessages([{ ...welcomeMessage, id: nextId.current++ }]);
     setFeedback({});
+    setFeedbackReasons({});
+    setExpandedMessages({});
   }
 
   function closeWidget() {
-    window.parent.postMessage({ type: "bigkinds-chatbot-close" }, "*");
+    const parentOrigin = document.referrer ? (() => { try { return new URL(document.referrer).origin; } catch { return ""; } })() : "";
+    window.parent.postMessage({ type: "bigkinds-chatbot-close" }, parentOrigin || "*");
   }
 
   return (
@@ -420,7 +508,41 @@ export default function Home() {
               {item.label}
             </button>
           ))}
+          <button type="button" onClick={() => setShowQueryBuilder((current) => !current)} aria-expanded={showQueryBuilder}>
+            검색식 만들기
+          </button>
         </div>
+
+        {contextLabel && <p className="context-note" role="status">{contextLabel}</p>}
+
+        {showQueryBuilder && (
+          <section className="query-builder" aria-label="BIGKinds 검색식 만들기">
+            <div className="query-builder-heading">
+              <strong>추천 검색식</strong>
+              <button type="button" onClick={() => setShowQueryBuilder(false)} aria-label="검색식 만들기 닫기">×</button>
+            </div>
+            <p className="query-builder-help">조건을 입력하면 AND, OR, NOT 규칙에 맞춰 검색식을 만듭니다.</p>
+            {(["any", "all", "exact", "exclude"] as const).map((field) => {
+              const labels = { any: "하나 이상 포함(OR)", all: "모두 포함(AND)", exact: "정확히 일치", exclude: "제외(NOT)" };
+              return <div className="builder-field" key={field}>
+                <label htmlFor={`builder-${field}`}>{labels[field]}</label>
+                <div className="builder-input-row">
+                  <input id={`builder-${field}`} value={queryBuilderText[field] || ""} onChange={(event) => setQueryBuilderText((current) => ({ ...current, [field]: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); builderAdd(field); } }} placeholder="단어를 입력하세요" />
+                  <button type="button" onClick={() => builderAdd(field)} aria-label={`${labels[field]} 추가`}>+</button>
+                </div>
+                <div className="builder-chips">{(queryBuilder[field] || []).map((term, index) => <button type="button" key={`${term}-${index}`} onClick={() => builderRemove(field, index)}>{term} ×</button>)}</div>
+              </div>;
+            })}
+            <output className="query-result" aria-live="polite">{builtSearchQuery || "검색어를 입력해 주세요"}</output>
+            <p className="query-description">{builtSearchDescription}</p>
+            <div className="query-actions">
+              <button type="button" disabled={!builtSearchQuery} onClick={applySearchQuery}>검색창에 적용</button>
+              <button type="button" disabled={!builtSearchQuery} onClick={() => copyText(builtSearchQuery)}>검색식 복사</button>
+              <button type="button" onClick={() => emitHostAction({ type: "OPEN_URL", label: "뉴스검색 화면 열기", url: "https://www.bigkinds.or.kr/v2/news/search.do" })}>뉴스검색 화면 열기</button>
+            </div>
+            <small>BIGKinds 검색연산자는 AND, OR, NOT을 대문자로 입력합니다.</small>
+          </section>
+        )}
 
         <div className="conversation" aria-live="polite">
           <div className="day-divider"><span>오늘</span></div>
@@ -439,6 +561,15 @@ export default function Home() {
                   <div className="bubble">
                     {matched && <span className="answer-label">{matched.category}</span>}
                     <p>{message.text}</p>
+                    {message.answerModel && (
+                      <div className="structured-answer">
+                        <button className="answer-expand" type="button" aria-expanded={Boolean(expandedMessages[message.id])} onClick={() => setExpandedMessages((current) => ({ ...current, [message.id]: !current[message.id] }))}>{expandedMessages[message.id] ? "간단히 보기" : "자세히 보기"}</button>
+                        {expandedMessages[message.id] && <p className="answer-full">{message.answerModel.details}</p>}
+                        {message.answerModel.steps.length > 0 && <div className="answer-block"><strong>이용 순서</strong><ol>{message.answerModel.steps.map((step) => <li key={step}>{formatAnswer(step)}</li>)}</ol></div>}
+                        {message.answerModel.cautions.length > 0 && <div className="answer-block caution-block"><strong>주의</strong><ul>{message.answerModel.cautions.map((caution) => <li key={caution}>{formatAnswer(caution)}</li>)}</ul></div>}
+                      </div>
+                    )}
+                    {message.diagnostic && <div className="diagnostic-flow"><strong>{message.diagnostic.title}</strong><div>{message.diagnostic.options.map((option) => <button type="button" key={option.label} onClick={() => ask(option.question)}>{option.label}</button>)}</div></div>}
                   </div>
 
                   {matched && (
@@ -448,28 +579,31 @@ export default function Home() {
                         공식 근거 확인 ↗
                       </a>
                       <span>{matched?.source?.label ?? "빅카인즈 공식 FAQ"}{matched?.source?.pages ? ` · ${matched.source.pages}` : ""}</span>
+                      {matched?.authority && <small className="authority-badge">{matched.authority === "CURRENT_POLICY" ? "현행 정책" : matched.authority === "OFFICIAL_FAQ" ? "공식 FAQ" : matched.authority === "OFFICIAL_INTRO" ? "공식 소개" : matched.authority === "VERIFIED_QNA" ? "검증된 Q&A" : "과거 Q&A 참고"}{matched.status === "REVIEW_REQUIRED" ? " · 검토 필요" : ""}</small>}
+                      {matched?.effectiveDate && <small className="effective-date">기준일 {matched.effectiveDate}</small>}
                     </div>
                       <div className="feedback" aria-label="답변 평가">
                         <span>도움이 됐나요?</span>
                         <button
                           type="button"
                           className={feedback[message.id] === "up" ? "selected" : ""}
-                          onClick={() => setFeedback((current) => ({ ...current, [message.id]: "up" }))}
+                          onClick={() => handleFeedback(message.id, "up")}
                           aria-label="도움이 됐어요"
                         >＋</button>
                         <button
                           type="button"
                           className={feedback[message.id] === "down" ? "selected" : ""}
-                          onClick={() => setFeedback((current) => ({ ...current, [message.id]: "down" }))}
+                          onClick={() => handleFeedback(message.id, "down")}
                           aria-label="도움이 안 됐어요"
                         >−</button>
                       </div>
+                      {feedback[message.id] === "down" && <div className="feedback-reasons" role="group" aria-label="도움이 되지 않은 이유">{["답변이 틀렸어요", "정보가 오래됐어요", "질문과 다른 답이에요", "설명이 어려워요", "원하는 내용이 없어요"].map((reason) => <button type="button" key={reason} className={feedbackReasons[message.id] === reason ? "selected" : ""} onClick={() => handleFeedbackReason(message.id, reason)}>{reason}</button>)}</div>}
                     </div>
                   )}
 
                   {index === 0 && messages.length === 1 && (
                     <div className="starter-list">
-                      {starterQuestions.map((question) => (
+                      {contextualStarters.map((question) => (
                         <button key={question} type="button" onClick={() => ask(question)}>
                           {question}<span aria-hidden="true">›</span>
                         </button>
@@ -485,6 +619,7 @@ export default function Home() {
                           {item.question}
                         </button>
                       ))}
+                      {message.isFallback && <div className="escalation-actions"><span>해결되지 않으면 문의 내용을 정리해 공식 Q&amp;A로 연결할 수 있습니다.</span><button type="button" onClick={() => copyText(`문의 유형: ${pageContext.pageType}\n질문: ${message.question || message.text}`)}>내용 복사</button><button type="button" onClick={() => emitHostAction({ type: "OPEN_QNA", label: "Q&A 열기", url: QNA_SOURCE_URL })}>Q&amp;A 열기</button></div>}
                     </div>
                   )}
                 </div>
