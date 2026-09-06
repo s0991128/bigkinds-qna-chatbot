@@ -10,6 +10,7 @@ for (const file of [
   "../public/data/qna-import.js",
   ...Array.from({ length: 21 }, (_, index) => `../public/data/qna-data-${String(index + 1).padStart(2, "0")}.js`),
   "../public/data/knowledge-base.js",
+  "../public/data/official-intro.js",
 ]) {
   const source = await readFile(new URL(file, import.meta.url), "utf8");
   vm.runInNewContext(source, sandbox, { filename: file });
@@ -23,6 +24,7 @@ test("downloaded upstream data is merged into one knowledge base", () => {
   assert.ok(kb.documents.some((item) => item.id === "api-pricing"));
   assert.ok(kb.documents.some((item) => item.id === "api-purchase-official"));
   assert.ok(kb.documents.some((item) => item.id === "privacy-security"));
+  assert.equal(kb.documents.filter((item) => item.id.startsWith("bigkinds-intro-")).length, 5);
 });
 
 test("every downloaded document contains answer and provenance metadata", () => {

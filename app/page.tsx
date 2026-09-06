@@ -46,6 +46,7 @@ const dataScriptPaths = [
   "/data/qna-import.js",
   ...Array.from({ length: 21 }, (_, index) => `/data/qna-data-${String(index + 1).padStart(2, "0")}.js`),
   "/data/knowledge-base.js",
+  "/data/official-intro.js",
 ];
 
 function loadScript(path: string) {
@@ -214,7 +215,7 @@ export default function Home() {
 
   return (
     <main className={embedded ? "site embedded" : "site"}>
-      {!embedded && !chatOpen && (
+      {!embedded && (
         <>
           <div className="gov-strip">이 화면은 빅카인즈 웹사이트 부착형 챗봇의 구현 예시입니다.</div>
           <header className="site-header">

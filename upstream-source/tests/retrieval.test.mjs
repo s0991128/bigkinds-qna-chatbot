@@ -9,7 +9,8 @@ for (const file of [
   "../public/data/verified-policy.js",
   "../public/data/qna-import.js",
   ...Array.from({ length: 21 }, (_, index) => `../public/data/qna-data-${String(index + 1).padStart(2, "0")}.js`),
-  "../public/data/knowledge-base.js"
+  "../public/data/knowledge-base.js",
+  "../public/data/official-intro.js"
 ]) {
   const source = await readFile(new URL(file, import.meta.url), "utf8");
   vm.runInNewContext(source, sandbox, { filename: file });
@@ -21,6 +22,7 @@ test("공식 자료가 모두 지식베이스에 병합된다", () => {
   assert.equal(kb.documents.filter((item) => item.id.startsWith("official-faq-")).length, 23);
   assert.ok(kb.documents.some((item) => item.id === "api-pricing"));
   assert.ok(kb.documents.some((item) => item.id === "api-purchase-official"));
+  assert.ok(kb.documents.some((item) => item.id === "bigkinds-intro-overview"));
 });
 
 test("모든 문서에 운영 메타데이터가 있다", () => {

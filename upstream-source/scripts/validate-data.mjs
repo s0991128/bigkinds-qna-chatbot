@@ -5,7 +5,8 @@ const files = [
   "../public/data/official-faq.js",
   "../public/data/verified-policy.js",
   "../public/data/qna-import.js",
-  "../public/data/knowledge-base.js"
+  "../public/data/knowledge-base.js",
+  "../public/data/official-intro.js"
 ];
 const sandbox = { window: {} };
 
@@ -32,6 +33,8 @@ for (const [index, document] of kb.documents.entries()) {
 
 const officialFaqCount = kb.documents.filter((document) => document.id.startsWith("official-faq-")).length;
 if (officialFaqCount !== 23) errors.push(`공식 FAQ 건수 오류: ${officialFaqCount}/23`);
+const introCount = kb.documents.filter((document) => document.id.startsWith("bigkinds-intro-")).length;
+if (introCount !== 5) errors.push(`공식 소개 자료 건수 오류: ${introCount}/5`);
 
 if (errors.length) {
   console.error(errors.join("\n"));
