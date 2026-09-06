@@ -29,6 +29,5 @@ export function getDiagnosticFlow(kind: DiagnosticKind): DiagnosticFlow {
     { label: "신청 방법", question: "Open API 신청 방법" },
     { label: "인증키 문제", question: "API 인증키가 작동하지 않아요" },
     { label: "호출 오류", question: "API 호출 오류가 발생했어요" },
-    { label: "요금·정책", question: "API 이용요금과 정책이 궁금해요" },
   ] };
 }

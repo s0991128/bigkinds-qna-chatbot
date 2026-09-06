@@ -51,12 +51,13 @@ test("upstream source snapshot and widget assets are present", async () => {
 });
 
 test("Service Copilot modules and policy safeguards are present", async () => {
-  const [context, builder, diagnostic, answer, feedback] = await Promise.all([
+  const [context, builder, diagnostic, answer, feedback, intents] = await Promise.all([
     readFile(new URL("../lib/page-context.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/search-query-builder.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/diagnostic-flows.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/answer-model.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/feedback.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/question-intents.ts", import.meta.url), "utf8"),
   ]);
   assert.match(context, /NEWS_SEARCH/);
   assert.match(context, /OPEN_API/);
@@ -66,4 +67,7 @@ test("Service Copilot modules and policy safeguards are present", async () => {
   assert.match(diagnostic, /DOWNLOAD_PROBLEM/);
   assert.match(answer, /AnswerViewModel/);
   assert.match(feedback, /질문 원문은 저장하지 않습니다/);
+  assert.match(intents, /detectSearchExpressionIntent/);
+  assert.match(intents, /todayInKorea/);
+  assert.match(intents, /isLikelyGeneralKnowledgeQuestion/);
 });

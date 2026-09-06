@@ -5,10 +5,12 @@ import { FAQ_SOURCE_URL, faqItems } from "../lib/faq";
 import { searchFaq, SearchableDocument } from "../lib/search";
 import { CHAT_HISTORY_KEY, formatAnswer } from "../lib/answer-format";
 import { buildAnswerViewModel, AnswerViewModel } from "../lib/answer-model";
-import { classifyPagePath, createPageContext, pageTypeLabels, PageContext, starterQuestionsByPage } from "../lib/page-context";
+import { classifyPagePath, createPageContext, pageTypeLabels, PageContext } from "../lib/page-context";
 import { buildSearchQuery, describeSearchQuery, SearchQueryInput } from "../lib/search-query-builder";
 import { detectDiagnosticKind, DiagnosticFlow, getDiagnosticFlow } from "../lib/diagnostic-flows";
 import { recordFeedback } from "../lib/feedback";
+import { detectSearchExpressionIntent, isDateQuestion, isLikelyGeneralKnowledgeQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
+import { generateRecommendedQuestions } from "../lib/recommendations";
 
 declare global {
   interface Window {
@@ -27,6 +29,8 @@ type Message = {
   diagnostic?: DiagnosticFlow;
   question?: string;
   apiRedirect?: boolean;
+  searchQuery?: { value: string; description: string };
+  usedAi?: boolean;
 };
 
 const welcomeMessage: Message = {
@@ -35,19 +39,13 @@ const welcomeMessage: Message = {
   text: "안녕하세요. 빅카인즈 공식 자료를 바탕으로 뉴스 검색·분석과 이용 방법을 안내해 드릴게요. 궁금한 내용을 편하게 물어보세요.",
 };
 
-const starterQuestions = [
-  "검색식과 연산자는 어떻게 쓰나요?",
-  "기사 본문 전체를 받을 수 있나요?",
-  "형태소와 바이그램은 뭐가 다른가요?",
-];
-
 const OPEN_API_PURCHASE_URL = "https://www.newstore.or.kr/store/prodct/newsdata/list.do";
+const LLM_USAGE_KEY = "bigkinds-llm-usage-v1";
+const LLM_DAILY_LIMIT = 20;
 
 const categoryPrompts = [
-  { label: "뉴스 검색", question: "검색조건의 기본값을 알려줘" },
+  { label: "뉴스 검색", question: "검색어는 어떤 방식으로 조합하나요?" },
   { label: "Open API", question: "OPEN API 관련 문의는 어디로 해야 하나요?" },
-  { label: "요금·정책", question: "API 이용요금과 정책이 궁금해" },
-  { label: "개인정보", question: "비밀번호나 인증키를 입력해도 돼?" },
 ];
 
 const dataScriptPaths = [
@@ -100,6 +98,46 @@ function isOpenApiQuestion(question: string) {
   return /open\s*api|openapi|\bapi\b|인증키|호출 오류|api 문의/i.test(question);
 }
 
+function routingNormalize(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isKeywordSufficientMatch(question: string, result: { item: SearchableDocument; score: number }) {
+  const normalizedQuestion = routingNormalize(question);
+  const itemText = routingNormalize([
+    result.item.question,
+    result.item.title,
+    ...(result.item.questions ?? []),
+    ...result.item.keywords,
+  ].filter(Boolean).join(" "));
+  if (!normalizedQuestion || !itemText) return false;
+  if (itemText.includes(normalizedQuestion) || result.score >= 48) return true;
+  const genericTerms = new Set(["전체", "내용", "질문", "관련", "방법", "알려", "어떻게", "무엇", "어떤", "있나요", "해주세요"]);
+  const terms = normalizedQuestion.split(" ")
+    .map((term) => term.replace(/[은는이가을를의에로으로]$/g, ""))
+    .filter((term) => term.length >= 2 && !genericTerms.has(term));
+  const matchedTerms = terms.filter((term) => itemText.includes(term));
+  return matchedTerms.length >= 2 && result.score >= 24;
+}
+
+function consumeLlmQuota() {
+  try {
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
+    const current = JSON.parse(window.localStorage.getItem(LLM_USAGE_KEY) || "null") as { date?: string; count?: number } | null;
+    const count = current?.date === today ? Number(current.count || 0) : 0;
+    if (count >= LLM_DAILY_LIMIT) return false;
+    window.localStorage.setItem(LLM_USAGE_KEY, JSON.stringify({ date: today, count: count + 1 }));
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 type KnowledgeType = "qna" | "faq" | "intro" | "policy";
 
 type KnowledgeGroup = {
@@ -138,6 +176,8 @@ export default function Home() {
   const [expandedMessages, setExpandedMessages] = useState<Record<number, boolean>>({});
   const [pageContext, setPageContext] = useState<PageContext>(() => createPageContext("/"));
   const [showQueryBuilder, setShowQueryBuilder] = useState(false);
+  const [showRecommendations, setShowRecommendations] = useState(true);
+  const [recommendedQuestions, setRecommendedQuestions] = useState<string[]>(() => generateRecommendedQuestions("HOME", faqItems));
   const [queryBuilder, setQueryBuilder] = useState<SearchQueryInput>({ any: [], all: [], exact: [], exclude: [] });
   const [queryBuilderText, setQueryBuilderText] = useState<Record<string, string>>({ any: "", all: "", exact: "", exclude: "" });
   const nextId = useRef(2);
@@ -147,6 +187,7 @@ export default function Home() {
     const isEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
     setEmbedded(isEmbed);
     setChatOpen(isEmbed);
+    setShowRecommendations(true);
     setPageContext(createPageContext(window.location.pathname));
 
     const onContext = (event: MessageEvent) => {
@@ -158,6 +199,8 @@ export default function Home() {
         pageType: incoming.pageType || classifyPagePath(incoming.pathname),
         loggedIn: incoming.loggedIn ?? null,
       });
+      setRecommendedQuestions((current) => generateRecommendedQuestions(incoming.pageType || classifyPagePath(incoming.pathname), knowledge, current));
+      setShowRecommendations(true);
     };
     window.addEventListener("message", onContext);
 
@@ -229,11 +272,6 @@ export default function Home() {
     [selectedDocumentId, selectedDocuments],
   );
 
-  const contextualStarters = useMemo(
-    () => starterQuestionsByPage[pageContext.pageType] ?? starterQuestions,
-    [pageContext.pageType],
-  );
-
   const contextLabel = pageTypeLabels[pageContext.pageType];
 
   const builtSearchQuery = useMemo(() => buildSearchQuery(queryBuilder), [queryBuilder]);
@@ -244,6 +282,12 @@ export default function Home() {
     setSelectedKnowledgeType(group.key);
     const firstDocument = knowledge.find((document) => getKnowledgeType(document) === group.key);
     setSelectedDocumentId(firstDocument?.id ?? null);
+  }
+
+  function openChat() {
+    setChatOpen(true);
+    setRecommendedQuestions((current) => generateRecommendedQuestions(pageContext.pageType, knowledge, current));
+    setShowRecommendations(true);
   }
 
   function emitHostAction(action: { type: string; label?: string; url?: string; value?: string }) {
@@ -308,13 +352,96 @@ export default function Home() {
     setMessages((current) => [...current, userMessage]);
     setQuery("");
     setIsTyping(true);
+    setShowRecommendations(false);
 
     const diagnosticKind = detectDiagnosticKind(cleanQuestion, pageContext.pageType);
+    const dateQuestion = isDateQuestion(cleanQuestion);
+    const searchExpressionIntent = detectSearchExpressionIntent(cleanQuestion);
+    const sensitive = /주민등록번호|비밀번호|인증키|api\s*key|apikey/i.test(cleanQuestion);
+    const generalKnowledgeQuestion = !sensitive && isLikelyGeneralKnowledgeQuestion(cleanQuestion);
 
-    window.setTimeout(() => {
-      const sensitive = /주민등록번호|비밀번호|인증키|api\s*key|apikey/i.test(cleanQuestion);
+    window.setTimeout(async () => {
+      if (dateQuestion) {
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId.current++,
+            role: "assistant",
+            text: `오늘은 ${todayInKorea()}입니다.\n\n한국 표준시(KST) 기준으로 안내했어요.`,
+            question: cleanQuestion,
+          },
+        ]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (searchExpressionIntent) {
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId.current++,
+            role: "assistant",
+            text: "요청하신 조건으로 BIGKinds 검색식을 만들었습니다.",
+            searchQuery: { value: searchExpressionIntent.query, description: searchExpressionIntent.description },
+            question: cleanQuestion,
+          },
+        ]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (isStoredArticleCountQuestion(cleanQuestion)) {
+        const storedCount = dataReady
+          ? `${knowledge.length}건의 공식 문서`
+          : "현재 확인 가능한 공식 문서";
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId.current++,
+            role: "assistant",
+            text: `이 챗봇에 저장된 데이터는 뉴스 기사 원문 전체가 아니라 빅카인즈 공식 Q&A·FAQ·소개·정책 문서입니다. 현재 ${storedCount}가 저장되어 있으며, 빅카인즈 전체 기사 보유 건수는 이 챗봇 데이터만으로 확인할 수 없습니다.`,
+            isFallback: true,
+            question: cleanQuestion,
+          },
+        ]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (isUnderspecifiedQuestion(cleanQuestion)) {
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId.current++,
+            role: "assistant",
+            text: "어떤 주제의 예시가 필요한지 조금 더 알려주세요. 예를 들어 ‘검색식을 만드는 예시를 보여줘’처럼 질문해 주시면 저장된 공식 문서를 기준으로 안내하겠습니다.",
+            isFallback: true,
+            question: cleanQuestion,
+          },
+        ]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (generalKnowledgeQuestion) {
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId.current++,
+            role: "assistant",
+            text: "질문의 의도는 일반 상식·시사 정보 확인으로 보이지만, 저장된 빅카인즈 공식 문서에는 해당 내용이 없습니다. 이 챗봇은 빅카인즈 이용 방법과 공식 Q&A 범위에서만 답변할 수 있어요.",
+            isFallback: true,
+            question: cleanQuestion,
+          },
+        ]);
+        setIsTyping(false);
+        return;
+      }
+
       const apiInquiry = isOpenApiQuestion(cleanQuestion) && !sensitive;
-      const results = searchFaq(cleanQuestion, 3, knowledge);
+      const searchHelp = /검색식|검색어|연산자/i.test(cleanQuestion) && /어떻게|방법|사용|쓰|조합/i.test(cleanQuestion);
+      const searchHelpDocument = searchHelp ? knowledge.find((item) => item.id === "official-faq-17") : undefined;
+      const results = searchHelpDocument ? [{ item: searchHelpDocument, score: 999 }] : searchFaq(cleanQuestion, 3, knowledge);
       const privacyDocument = knowledge.find((item) => item.id === "privacy-security");
       const safeResults = sensitive && privacyDocument
         ? [{ item: privacyDocument, score: 999 }]
@@ -351,23 +478,52 @@ export default function Home() {
         ]);
       } else {
         const answerModel = buildAnswerViewModel(best.item);
+        const keywordAnswer = isKeywordSufficientMatch(cleanQuestion, best);
+        const aiAnswer = !sensitive && !keywordAnswer && consumeLlmQuota()
+          ? await requestLlmAnswer(cleanQuestion, safeResults)
+          : null;
         setMessages((current) => [
           ...current,
           {
             id: assistantId,
             role: "assistant",
-            text: answerModel.summary,
+            text: aiAnswer || answerModel.summary,
             matchedId: best.item.id,
             relatedIds: safeResults.slice(1).map((result) => result.item.id),
             answerModel,
             question: cleanQuestion,
+            usedAi: Boolean(aiAnswer),
           },
         ]);
-        saveHistory(cleanQuestion, best.item.answer, best.item);
+        saveHistory(cleanQuestion, aiAnswer || best.item.answer, best.item);
       }
 
       setIsTyping(false);
     }, 420);
+  }
+
+  async function requestLlmAnswer(question: string, results: Array<{ item: SearchableDocument; score: number }>) {
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          question,
+          sources: results.slice(0, 3).map(({ item, score }) => ({
+            id: item.id,
+            title: item.title || item.question,
+            answer: item.answer,
+            effectiveDate: item.effectiveDate,
+            score,
+          })),
+        }),
+      });
+      if (!response.ok) return null;
+      const payload = await response.json() as { answer?: unknown };
+      return typeof payload.answer === "string" && payload.answer.trim() ? payload.answer.trim() : null;
+    } catch {
+      return null;
+    }
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -380,6 +536,8 @@ export default function Home() {
     setFeedback({});
     setFeedbackReasons({});
     setExpandedMessages({});
+    setRecommendedQuestions((current) => generateRecommendedQuestions(pageContext.pageType, knowledge, current));
+    setShowRecommendations(true);
   }
 
   function closeWidget() {
@@ -534,6 +692,15 @@ export default function Home() {
 
         {contextLabel && <p className="context-note" role="status">{contextLabel}</p>}
 
+        {showRecommendations && (
+          <section className="recommendation-panel" aria-label="추천 질문">
+            <div className="recommendation-heading"><strong>지금 많이 묻는 질문</strong><span>열 때마다 새로 추천합니다</span></div>
+            <div className="recommendation-list">
+              {recommendedQuestions.map((question) => <button key={question} type="button" onClick={() => ask(question)} disabled={isTyping}>{question}<span aria-hidden="true">›</span></button>)}
+            </div>
+          </section>
+        )}
+
         {showQueryBuilder && (
           <section className="query-builder" aria-label="BIGKinds 검색식 만들기">
             <div className="query-builder-heading">
@@ -581,6 +748,7 @@ export default function Home() {
                     {matched && <span className="answer-label">{matched.category}</span>}
                     <p>{message.text}</p>
                     {message.apiRedirect && <div className="api-redirect"><button type="button" onClick={() => emitHostAction({ type: "OPEN_URL", label: "뉴스토어에서 OPEN API 문의하기", url: OPEN_API_PURCHASE_URL })}>뉴스토어에서 OPEN API 문의하기 ↗</button></div>}
+                    {message.searchQuery && <div className="search-query-answer"><strong>추천 검색식</strong><code>{message.searchQuery.value}</code><p>{message.searchQuery.description}</p><div><button type="button" onClick={() => emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: message.searchQuery?.value })}>검색창에 적용</button><button type="button" onClick={() => copyText(message.searchQuery?.value || "")}>검색식 복사</button></div></div>}
                     {message.answerModel && (
                       <div className="structured-answer">
                         <button className="answer-expand" type="button" aria-expanded={Boolean(expandedMessages[message.id])} onClick={() => setExpandedMessages((current) => ({ ...current, [message.id]: !current[message.id] }))}>{expandedMessages[message.id] ? "간단히 보기" : "자세히 보기"}</button>
@@ -599,6 +767,7 @@ export default function Home() {
                         공식 근거 확인 ↗
                       </a>
                       <span>{matched?.source?.label ?? "빅카인즈 공식 FAQ"}{matched?.source?.pages ? ` · ${matched.source.pages}` : ""}</span>
+                      {message.usedAi && <small className="authority-badge ai-badge">근거 기반 AI 보완</small>}
                       {matched?.authority && <small className="authority-badge">{matched.authority === "CURRENT_POLICY" ? "현행 정책" : matched.authority === "OFFICIAL_FAQ" ? "공식 FAQ" : matched.authority === "OFFICIAL_INTRO" ? "공식 소개" : matched.authority === "VERIFIED_QNA" ? "검증된 Q&A" : "과거 Q&A 참고"}{matched.status === "REVIEW_REQUIRED" ? " · 검토 필요" : ""}</small>}
                       {matched?.effectiveDate && <small className="effective-date">기준일 {matched.effectiveDate}</small>}
                     </div>
@@ -618,16 +787,6 @@ export default function Home() {
                         >−</button>
                       </div>
                       {feedback[message.id] === "down" && <div className="feedback-reasons" role="group" aria-label="도움이 되지 않은 이유">{["답변이 틀렸어요", "정보가 오래됐어요", "질문과 다른 답이에요", "설명이 어려워요", "원하는 내용이 없어요"].map((reason) => <button type="button" key={reason} className={feedbackReasons[message.id] === reason ? "selected" : ""} onClick={() => handleFeedbackReason(message.id, reason)}>{reason}</button>)}</div>}
-                    </div>
-                  )}
-
-                  {index === 0 && messages.length === 1 && (
-                    <div className="starter-list">
-                      {contextualStarters.map((question) => (
-                        <button key={question} type="button" onClick={() => ask(question)}>
-                          {question}<span aria-hidden="true">›</span>
-                        </button>
-                      ))}
                     </div>
                   )}
 
@@ -673,7 +832,7 @@ export default function Home() {
         </form>
       </section>}
       {!embedded && !chatOpen && (
-        <button className="page-launcher" type="button" onClick={() => setChatOpen(true)} aria-label="빅카인즈 이용 도우미 열기">
+        <button className="page-launcher" type="button" onClick={openChat} aria-label="빅카인즈 이용 도우미 열기">
           B<span aria-hidden="true" />
         </button>
       )}

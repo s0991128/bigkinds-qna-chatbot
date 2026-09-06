@@ -62,7 +62,13 @@ export function searchFaq(query: string, limit = 3, documents: SearchableDocumen
   const normalizedQuery = normalize(query);
   if (!normalizedQuery) return [];
 
-  const terms = expandedTerms(query);
+  const lexicalTerms = normalizedQuery
+    .split(" ")
+    .flatMap((term) => [term, term.replace(/[은는이가을를의에로으로]$/g, "")])
+    .filter((term, index, terms) => term.length >= 2 && terms.indexOf(term) === index);
+  const genericTerms = new Set(["전체", "내용", "질문", "예시", "예시를", "어떤", "무엇", "방법", "알려", "알려줘", "해주세요", "해줘", "들어", "들어줘", "해야", "너한테는", "뭐", "좀"]);
+  const meaningfulTerms = lexicalTerms.filter((term) => !genericTerms.has(term));
+  const terms = [...new Set([...expandedTerms(query), ...lexicalTerms])];
 
   return documents
     .map((item) => {
@@ -71,14 +77,21 @@ export function searchFaq(query: string, limit = 3, documents: SearchableDocumen
       const keywords = normalize(item.keywords.join(" "));
       const answer = normalize(item.answer);
       let score = 0;
+      let directMatch = question.includes(normalizedQuery);
 
       if (question.includes(normalizedQuery)) score += 30;
       if (normalizedQuery.length >= 3 && normalizedQuery.includes(question)) score += 16;
 
       terms.forEach((term) => {
         if (term.length < 2) return;
-        if (question.includes(term)) score += term.length >= 4 ? 5 : 2;
-        if (keywords.includes(term)) score += term.length >= 4 ? 7 : 3;
+        if (question.includes(term)) {
+          score += term.length >= 4 ? 5 : 2;
+          if (meaningfulTerms.includes(term)) directMatch = true;
+        }
+        if (keywords.includes(term)) {
+          score += term.length >= 4 ? 7 : 3;
+          if (meaningfulTerms.includes(term)) directMatch = true;
+        }
         if (answer.includes(term)) score += 1;
       });
 
@@ -93,9 +106,9 @@ export function searchFaq(query: string, limit = 3, documents: SearchableDocumen
       if (item.status === "REVIEW_REQUIRED") score -= 1;
       if (item.status === "SUPERSEDED") score -= 100;
 
-      return { item, score };
+      return { item, score, directMatch };
     })
-    .filter((result) => result.score >= 4 && result.item.status !== "SUPERSEDED")
+    .filter((result) => result.score >= 4 && result.directMatch && result.item.status !== "SUPERSEDED")
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 }

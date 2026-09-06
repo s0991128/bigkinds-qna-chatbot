@@ -14,6 +14,17 @@ function exactTerm(value: string) {
   return cleaned ? `"${cleaned}"` : "";
 }
 
+function joinTerms(values: string[], conjunction: string) {
+  if (values.length <= 1) return values[0] || "";
+  return `${values.slice(0, -1).join(", ")}${conjunction}${values.at(-1)}`;
+}
+
+function objectParticle(value: string) {
+  const last = value.trim().at(-1) || "";
+  const code = last.charCodeAt(0);
+  return code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28 !== 0 ? "을" : "를";
+}
+
 export function buildSearchQuery(input: SearchQueryInput) {
   const any = cleanTerms(input.any).map((term) => term.includes(" ") ? exactTerm(term) : term);
   const all = cleanTerms(input.all).map((term) => term.includes(" ") ? exactTerm(term) : term);
@@ -34,7 +45,10 @@ export function describeSearchQuery(input: SearchQueryInput) {
   const exclude = cleanTerms(input.exclude);
   const sentences: string[] = [];
   if (any.length) sentences.push(`${any.join(" 또는 ")} 중 하나 이상을 포함하고`);
-  if (all.length) sentences.push(`${all.join(", ")}을(를) 함께 포함하고`);
+  if (all.length) {
+    const listed = joinTerms(all, "과 ");
+    sentences.push(`${listed}${objectParticle(listed)} 모두 포함하고`);
+  }
   if (exact.length) sentences.push(`${exact.map((term) => `“${term}”`).join(", ")} 문구를 그대로 포함하고`);
   if (exclude.length) sentences.push(`${exclude.join(", ")}이(가) 포함된 기사는 제외합니다.`);
   if (sentences.length && !sentences.at(-1)?.endsWith(".")) sentences[sentences.length - 1] += ".";
