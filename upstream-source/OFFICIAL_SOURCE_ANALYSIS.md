@@ -57,7 +57,7 @@
 ## API 신청·구매
 
 - 뉴스토어: https://www.newstore.or.kr/
-- API 구매 요청: https://forms.gle/mb1d4jSFLhUnoSzv6
+- API 구매 요청: https://www.newstore.or.kr/store/prodct/newsdata/list.do
 - 뉴스저작권팀: 02-2001-7793, 평일 09:00~18:00
 
 ## 학술연구
