@@ -244,7 +244,7 @@ export default function Home() {
           {
             id: assistantId,
             role: "assistant",
-            text: "공식 FAQ에서 질문과 충분히 가까운 내용을 찾지 못했어요. 질문을 짧게 바꾸거나 아래 주제 중 하나를 선택해 주세요. 계속 해결되지 않으면 bigkinds@kpf.or.kr로 문의할 수 있습니다.",
+            text: "저장된 공식 문서에서 질문과 직접 관련된 내용을 찾지 못했어요. 이 챗봇은 빅카인즈 FAQ·정책·소개·Q&A 범위에서만 안내합니다. 질문을 조금 더 구체적으로 바꾸거나 관련 주제를 선택해 주세요.",
             isFallback: true,
           },
         ]);

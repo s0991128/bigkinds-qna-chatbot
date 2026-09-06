@@ -134,7 +134,7 @@
 
     if (!top || top.score < (config.search?.minConfidence ?? 0.2)) {
       return {
-        html: "공식 자료에서 바로 확인되는 답을 찾지 못했습니다. 질문을 조금 더 구체적으로 적어 주시거나 담당자 안내가 필요합니다.",
+        html: "저장된 공식 문서에서 질문과 직접 관련된 답변을 찾지 못했습니다. 이 챗봇은 빅카인즈 FAQ·정책·소개·Q&A 범위에서만 안내하므로, 질문을 조금 더 구체적으로 작성하거나 담당자 안내를 이용해 주세요.",
         escalate: true,
         category: "기타",
         confidence: top?.score || 0

@@ -21,9 +21,9 @@ window.BIGKINDS_VERIFIED_POLICY = [
       "요금"
     ],
     answer:
-      "빅카인즈 API는 공식 안내 채널에서 신청합니다. 요금과 계약 조건을 먼저 확인한 뒤, 구매 요청 폼을 제출하면 담당자가 안내합니다. 기준일은 2026-01-01이며, 별도 안내가 없으면 2026-12-31까지는 기존 요금이 유지되는 것으로 설명할 수 있습니다. 200만 건 초과 사용이나 상세한 계약 조건은 담당자 확인이 필요합니다. 문의는 newstore.or.kr, 구매 요청은 forms.gle/mb1d4jSFLhUnoSzv6, 전화는 02-2001-7793, 평일 09:00~18:00입니다.",
+      "빅카인즈 API는 공식 안내 채널에서 신청합니다. 요금과 계약 조건을 먼저 확인한 뒤, 구매 요청 폼을 제출하면 담당자가 안내합니다. 기준일은 2026-01-01이며, 별도 안내가 없으면 2026-12-31까지는 기존 요금이 유지되는 것으로 설명할 수 있습니다. 200만 건 초과 사용이나 상세한 계약 조건은 담당자 확인이 필요합니다. 문의는 newstore.or.kr, 구매 요청은 https://www.newstore.or.kr/store/prodct/newsdata/list.do, 전화는 02-2001-7793, 평일 09:00~18:00입니다.",
     facts: [
-      "구매 요청 폼: https://forms.gle/mb1d4jSFLhUnoSzv6",
+      "구매 요청 폼: https://www.newstore.or.kr/store/prodct/newsdata/list.do",
       "문의처: https://www.newstore.or.kr/",
       "전화: 02-2001-7793"
     ],
