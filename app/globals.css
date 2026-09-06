@@ -217,6 +217,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .diagnostic-flow strong { color: var(--navy-900); font-size: 11px; }
 .diagnostic-flow > div { display: flex; flex-wrap: wrap; gap: 5px; }
 .diagnostic-flow button { padding: 6px 8px; border: 1px solid #d3e0f2; border-radius: 999px; background: #f8fbff; color: #3d5f91; cursor: pointer; font-size: 10px; }
+.api-redirect { margin-top: 10px; padding-top: 9px; border-top: 1px solid #edf1f5; }
+.api-redirect button { padding: 8px 10px; border: 1px solid #2d70dc; border-radius: 8px; background: #2d70dc; color: white; cursor: pointer; font-size: 10px; font-weight: 750; }
 .answer-label { display: inline-flex; margin: 0 0 8px; padding: 4px 7px; border-radius: 6px; background: var(--blue-100); color: #1859bf; font-size: 10px; font-weight: 800; }
 .answer-facts, .answer-steps { margin: 10px 0 0; padding-left: 18px; color: #4e5d72; font-size: 11px; line-height: 1.65; }
 .answer-facts li::marker { color: var(--blue-500); }

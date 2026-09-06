@@ -28,9 +28,7 @@ window.BIGKINDS_CHATBOT_CONFIG = {
     contactUrl: "https://www.bigkinds.or.kr/news/qnaList.do",
     contactLabel: "공식 Q&A 문의",
     purchaseRequestUrl: "https://www.newstore.or.kr/store/prodct/newsdata/list.do",
-    purchaseRequestLabel: "API 구매 요청",
-    phone: "02-2001-7574",
-    businessHours: "평일 09:00~18:00"
+    purchaseRequestLabel: "뉴스토어에서 OPEN API 문의"
   },
   privacy: {
     warning:

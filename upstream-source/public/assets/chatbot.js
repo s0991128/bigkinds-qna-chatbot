@@ -131,6 +131,16 @@
       };
     }
 
+    if (/open\s*api|openapi|\bapi\b|인증키|호출 오류|api 문의/i.test(question)) {
+      const purchaseUrl = config.escalation?.purchaseRequestUrl || "https://www.newstore.or.kr/store/prodct/newsdata/list.do";
+      return {
+        html: `OPEN API 관련 문의와 구매 신청은 뉴스토어에서 확인해 주세요. 기존 챗봇에 저장된 OPEN API 안내는 최신 계약·요금 조건과 다를 수 있어 여기서 제공하지 않습니다.<br><a class="bk-action" href="${esc(purchaseUrl)}" target="_blank" rel="noopener">뉴스토어에서 OPEN API 문의하기 ↗</a>`,
+        escalate: false,
+        category: "OPEN API",
+        confidence: 1
+      };
+    }
+
     if (!top || top.score < (config.search?.minConfidence ?? 0.2)) {
       return {
         html: "저장된 공식 문서에서 질문과 직접 관련된 답변을 찾지 못했습니다. 이 챗봇은 빅카인즈 FAQ·정책·소개·Q&A 범위에서만 안내하므로, 질문을 조금 더 구체적으로 작성하거나 담당자 안내를 이용해 주세요.",

@@ -64,7 +64,7 @@ export const pageTypeLabels: Partial<Record<PageType, string>> = {
 export const starterQuestionsByPage: Record<PageType, string[]> = {
   HOME: ["뉴스 검색·분석은 어떻게 시작하나요?", "Open API는 어떻게 이용하나요?", "어떤 뉴스가 수록되어 있나요?", "분석결과는 어떻게 활용하나요?"],
   NEWS_SEARCH: ["검색결과가 안 나와요", "검색식을 만들어 주세요", "형태소와 바이그램 차이가 궁금해요", "검색결과를 다운로드하고 싶어요"],
-  OPEN_API: ["Open API 신청 방법", "API 이용요금과 정책", "인증키 관련 문제", "API 호출 오류"],
+  OPEN_API: ["OPEN API 문의·구매 안내"],
   FAQ: ["FAQ에서 원하는 내용을 찾고 싶어요", "담당자에게 문의하고 싶어요"],
   QNA: ["문의 전 관련 답변 찾아보기", "서비스 오류 문의 방법", "저작권 관련 문의"],
   MORPHEME_ANALYSIS: ["형태소와 바이그램 차이가 궁금해요", "개체명 분석은 어떻게 하나요?"],

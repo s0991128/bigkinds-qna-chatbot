@@ -26,6 +26,7 @@ type Message = {
   answerModel?: AnswerViewModel;
   diagnostic?: DiagnosticFlow;
   question?: string;
+  apiRedirect?: boolean;
 };
 
 const welcomeMessage: Message = {
@@ -40,9 +41,11 @@ const starterQuestions = [
   "형태소와 바이그램은 뭐가 다른가요?",
 ];
 
+const OPEN_API_PURCHASE_URL = "https://www.newstore.or.kr/store/prodct/newsdata/list.do";
+
 const categoryPrompts = [
   { label: "뉴스 검색", question: "검색조건의 기본값을 알려줘" },
-  { label: "Open API", question: "Open API 신청과 사용 방법을 알려줘" },
+  { label: "Open API", question: "OPEN API 관련 문의는 어디로 해야 하나요?" },
   { label: "요금·정책", question: "API 이용요금과 정책이 궁금해" },
   { label: "개인정보", question: "비밀번호나 인증키를 입력해도 돼?" },
 ];
@@ -91,6 +94,10 @@ function normalizeKnowledgeDocument(document: SearchableDocument): SearchableDoc
     authority,
     status,
   };
+}
+
+function isOpenApiQuestion(question: string) {
+  return /open\s*api|openapi|\bapi\b|인증키|호출 오류|api 문의/i.test(question);
 }
 
 type KnowledgeType = "qna" | "faq" | "intro" | "policy";
@@ -306,6 +313,7 @@ export default function Home() {
 
     window.setTimeout(() => {
       const sensitive = /주민등록번호|비밀번호|인증키|api\s*key|apikey/i.test(cleanQuestion);
+      const apiInquiry = isOpenApiQuestion(cleanQuestion) && !sensitive;
       const results = searchFaq(cleanQuestion, 3, knowledge);
       const privacyDocument = knowledge.find((item) => item.id === "privacy-security");
       const safeResults = sensitive && privacyDocument
@@ -314,7 +322,18 @@ export default function Home() {
       const best = safeResults[0];
       const assistantId = nextId.current++;
 
-      if (diagnosticKind && cleanQuestion.length < 40) {
+      if (apiInquiry) {
+        setMessages((current) => [
+          ...current,
+          {
+            id: assistantId,
+            role: "assistant",
+            text: "OPEN API 관련 문의와 구매 신청은 뉴스토어에서 확인해 주세요. 기존 챗봇에 저장된 OPEN API 안내는 최신 계약·요금 조건과 다를 수 있어 여기서 제공하지 않습니다.",
+            apiRedirect: true,
+            question: cleanQuestion,
+          },
+        ]);
+      } else if (diagnosticKind && cleanQuestion.length < 40) {
         setMessages((current) => [
           ...current,
           { id: assistantId, role: "assistant", text: getDiagnosticFlow(diagnosticKind).title, diagnostic: getDiagnosticFlow(diagnosticKind), question: cleanQuestion },
@@ -503,14 +522,14 @@ export default function Home() {
         </header>
 
         <div className="topic-strip" aria-label="빠른 주제 선택">
+          <button type="button" onClick={() => setShowQueryBuilder((current) => !current)} aria-expanded={showQueryBuilder}>
+            검색식 만들기
+          </button>
           {categoryPrompts.map((item) => (
             <button key={item.label} type="button" onClick={() => ask(item.question)} disabled={isTyping}>
               {item.label}
             </button>
           ))}
-          <button type="button" onClick={() => setShowQueryBuilder((current) => !current)} aria-expanded={showQueryBuilder}>
-            검색식 만들기
-          </button>
         </div>
 
         {contextLabel && <p className="context-note" role="status">{contextLabel}</p>}
@@ -561,6 +580,7 @@ export default function Home() {
                   <div className="bubble">
                     {matched && <span className="answer-label">{matched.category}</span>}
                     <p>{message.text}</p>
+                    {message.apiRedirect && <div className="api-redirect"><button type="button" onClick={() => emitHostAction({ type: "OPEN_URL", label: "뉴스토어에서 OPEN API 문의하기", url: OPEN_API_PURCHASE_URL })}>뉴스토어에서 OPEN API 문의하기 ↗</button></div>}
                     {message.answerModel && (
                       <div className="structured-answer">
                         <button className="answer-expand" type="button" aria-expanded={Boolean(expandedMessages[message.id])} onClick={() => setExpandedMessages((current) => ({ ...current, [message.id]: !current[message.id] }))}>{expandedMessages[message.id] ? "간단히 보기" : "자세히 보기"}</button>
