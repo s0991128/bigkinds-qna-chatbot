@@ -60,8 +60,13 @@ export function isDateQuestion(question: string) {
 export function isStoredArticleCountQuestion(question: string) {
   const hasCount = /몇\s*(?:건|개|개수)?|개수|건수|얼마/i.test(question);
   const hasContent = /기사|뉴스|문서|데이터|자료/i.test(question);
-  const hasStorage = /저장|보유|수록|전체|총/i.test(question);
+  const hasStorage = /저장|보유|수록|전체|총|가지고\s*있|몇\s*건의/i.test(question);
   return hasCount && hasContent && hasStorage;
+}
+
+export function isKnowledgeDocumentsQuestion(question: string) {
+  return /검색\s*문서|저장된\s*문서|문서\s*유형|지식\s*문서/i.test(question)
+    && /어떤|무엇|내용|종류|구성|있어|보여/i.test(question);
 }
 
 export function isUnderspecifiedQuestion(question: string) {

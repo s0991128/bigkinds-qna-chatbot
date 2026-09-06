@@ -1,13 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CHAT_HISTORY_KEY, ChatHistoryItem, formatAnswer } from "../../lib/answer-format";
+import { CHAT_HISTORY_KEY, ChatHistoryItem, formatAnswer, normalizeChatHistory } from "../../lib/answer-format";
 
 export default function HistoryPage() {
   const [items, setItems] = useState<ChatHistoryItem[]>([]);
 
   useEffect(() => {
-    try { setItems(JSON.parse(window.localStorage.getItem(CHAT_HISTORY_KEY) || "[]")); } catch { setItems([]); }
+    try {
+      const normalized = normalizeChatHistory(JSON.parse(window.localStorage.getItem(CHAT_HISTORY_KEY) || "[]"));
+      window.localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(normalized));
+      setItems(normalized);
+    } catch { setItems([]); }
   }, []);
 
   function clearHistory() {
@@ -17,7 +21,10 @@ export default function HistoryPage() {
 
   function exportHistory() {
     if (!items.length) return;
-    const csvCell = (value: string) => `"${value.replace(/\"/g, "\"\"").replace(/\r?\n/g, "\n")}"`;
+    const csvCell = (value: string) => {
+      const escaped = value.replace(/"/g, '""').replace(/\r?\n/g, "\n");
+      return `"${escaped}"`;
+    };
     const rows = [
       ["일시", "유형", "질문", "답변", "출처 URL"],
       ...items.map((item) => [

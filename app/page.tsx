@@ -3,13 +3,13 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { FAQ_SOURCE_URL, faqItems } from "../lib/faq";
 import { searchFaq, SearchableDocument } from "../lib/search";
-import { CHAT_HISTORY_KEY, formatAnswer } from "../lib/answer-format";
+import { CHAT_HISTORY_KEY, formatAnswer, OPEN_API_PURCHASE_URL } from "../lib/answer-format";
 import { buildAnswerViewModel, AnswerViewModel } from "../lib/answer-model";
 import { classifyPagePath, createPageContext, pageTypeLabels, PageContext } from "../lib/page-context";
 import { buildSearchQuery, describeSearchQuery, SearchQueryInput } from "../lib/search-query-builder";
 import { detectDiagnosticKind, DiagnosticFlow, getDiagnosticFlow } from "../lib/diagnostic-flows";
 import { recordFeedback } from "../lib/feedback";
-import { detectSearchExpressionIntent, isDateQuestion, isLikelyGeneralKnowledgeQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
+import { detectSearchExpressionIntent, isDateQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
 import { generateRecommendedQuestions } from "../lib/recommendations";
 
 declare global {
@@ -39,7 +39,6 @@ const welcomeMessage: Message = {
   text: "안녕하세요. 빅카인즈 공식 자료를 바탕으로 뉴스 검색·분석과 이용 방법을 안내해 드릴게요. 궁금한 내용을 편하게 물어보세요.",
 };
 
-const OPEN_API_PURCHASE_URL = "https://www.newstore.or.kr/store/prodct/newsdata/list.do";
 const LLM_USAGE_KEY = "bigkinds-llm-usage-v1";
 const LLM_DAILY_LIMIT = 20;
 
@@ -391,15 +390,28 @@ export default function Home() {
       }
 
       if (isStoredArticleCountQuestion(cleanQuestion)) {
-        const storedCount = dataReady
-          ? `${knowledge.length}건의 공식 문서`
-          : "현재 확인 가능한 공식 문서";
         setMessages((current) => [
           ...current,
           {
             id: nextId.current++,
             role: "assistant",
-            text: `이 챗봇에 저장된 데이터는 뉴스 기사 원문 전체가 아니라 빅카인즈 공식 Q&A·FAQ·소개·정책 문서입니다. 현재 ${storedCount}가 저장되어 있으며, 빅카인즈 전체 기사 보유 건수는 이 챗봇 데이터만으로 확인할 수 없습니다.`,
+            text: `이 챗봇에 저장된 데이터는 뉴스 기사 원문 전체가 아니라 빅카인즈 공식 Q&A·FAQ·소개·정책 문서입니다. 현재 ${dataReady ? `${knowledge.length}건의 공식 문서` : "확인 가능한 공식 문서"}가 저장되어 있으며, 빅카인즈 전체 기사 보유 건수는 이 챗봇 데이터만으로 확인할 수 없습니다.`,
+            isFallback: true,
+            question: cleanQuestion,
+          },
+        ]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (isKnowledgeDocumentsQuestion(cleanQuestion)) {
+        const groups = knowledgeGroups.filter((group) => group.count > 0).map((group) => `${group.label} ${group.count}건`);
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId.current++,
+            role: "assistant",
+            text: `${groups.length ? `현재 검색 문서는 ${groups.join(", ")}로 구성되어 있습니다. ` : "검색 문서 유형을 확인하는 중입니다. "}뉴스 기사 원문 전체가 아니라 빅카인즈 공식 Q&A·FAQ·소개·정책 자료를 저장하며, 근거가 없는 질문에는 임의로 답변하지 않습니다.`,
             isFallback: true,
             question: cleanQuestion,
           },

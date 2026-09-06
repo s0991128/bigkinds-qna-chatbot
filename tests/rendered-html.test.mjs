@@ -69,5 +69,6 @@ test("Service Copilot modules and policy safeguards are present", async () => {
   assert.match(feedback, /질문 원문은 저장하지 않습니다/);
   assert.match(intents, /detectSearchExpressionIntent/);
   assert.match(intents, /todayInKorea/);
+  assert.match(intents, /isKnowledgeDocumentsQuestion/);
   assert.match(intents, /isLikelyGeneralKnowledgeQuestion/);
 });
