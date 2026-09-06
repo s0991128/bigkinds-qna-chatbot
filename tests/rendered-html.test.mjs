@@ -21,8 +21,10 @@ test("server-renders the BIGKinds chatbot shell", async () => {
 
   const html = await response.text();
   assert.match(html, /빅카인즈 이용 도우미/);
-  assert.match(html, /공식 FAQ 23건/);
+  assert.match(html, /<strong>23<\/strong><span>공식 FAQ/);
   assert.match(html, /필요한 답부터 찾으세요/);
+  assert.match(html, /저장된 공식 문서를 기준으로 안내합니다/);
+  assert.match(html, /로그인 없이 하루 최대 5회/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
@@ -31,7 +33,7 @@ test("embed route renders the same chatbot without demo chrome", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /빅카인즈 이용 도우미/);
-  assert.match(html, /dataScriptPaths|공식 FAQ 연결 중|공식 FAQ 23건/);
+  assert.match(html, /dataScriptPaths|BIG KINDS|빅카인즈 이용/);
 });
 
 test("upstream source snapshot and widget assets are present", async () => {
@@ -71,4 +73,7 @@ test("Service Copilot modules and policy safeguards are present", async () => {
   assert.match(intents, /todayInKorea/);
   assert.match(intents, /isKnowledgeDocumentsQuestion/);
   assert.match(intents, /isLikelyGeneralKnowledgeQuestion/);
+  assert.match(intents, /isArticleContentQuestion/);
+  assert.match(intents, /isQnaRankingQuestion/);
+  assert.match(intents, /isSearchUsageQuestion/);
 });

@@ -69,6 +69,17 @@ export function isKnowledgeDocumentsQuestion(question: string) {
     && /어떤|무엇|내용|종류|구성|있어|보여/i.test(question);
 }
 
+export function isQnaRankingQuestion(question: string) {
+  return /(?:q\s*&?\s*a|qna|질문답변|공식\s*q\s*&?\s*a)/i.test(question)
+    && /top\s*\d+|상위\s*\d+|가장\s*많이|인기|많은\s*(?:질문|qna)/i.test(question);
+}
+
+export function isSearchUsageQuestion(question: string) {
+  const hasSearchTopic = /뉴스\s*(?:검색|검색·분석)|검색·분석|뉴스검색/i.test(question);
+  const asksHow = /이용|방법|시작|어떻게|알려|순서|사용/i.test(question);
+  return hasSearchTopic && asksHow;
+}
+
 export function isUnderspecifiedQuestion(question: string) {
   const normalized = question.toLowerCase().replace(/[\s?!.,。？！]+/g, " ").trim();
   return /^(?:예시(?:를)?\s*(?:들어|보여)?줘|예를\s*들어줘|너한테는\s*어떤\s*질문을\s*해야\s*해|무슨\s*질문을\s*해야\s*해|무엇을\s*물어봐야\s*해|더\s*알려줘|자세히\s*설명해줘|도와줘)$/.test(normalized);
@@ -78,6 +89,12 @@ export function isLikelyGeneralKnowledgeQuestion(question: string) {
   const serviceTerms = /빅카인즈|검색|기사|뉴스|데이터|api|faq|qna|이용|저작권|다운로드|분석|회원|오류|문의|정책|요금|검색식|연산자|형태소|바이그램|언론사|본문|수집|시각화/i;
   const generalTerms = /대한민국|한국|대통령|총리|날씨|환율|주가|누구|무엇|몇\s*(?:명|개|년|월|일)|언제|어디|왜/i;
   return generalTerms.test(question) && !serviceTerms.test(question);
+}
+
+export function isArticleContentQuestion(question: string) {
+  const hasArticle = /기사|뉴스|원문|본문/i.test(question);
+  const asksForContent = /요약|정리|전문을?|본문을?\s*(?:보여|읽|가져|전달)|내용을?\s*(?:알려|보여|정리)|분석해|핵심만/i.test(question);
+  return hasArticle && asksForContent;
 }
 
 export function todayInKorea() {

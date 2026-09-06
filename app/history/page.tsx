@@ -50,7 +50,7 @@ export default function HistoryPage() {
   return (
     <main className="history-page">
       <header className="history-header">
-        <a className="site-brand" href="/"><span className="brand-tile">B</span><span><strong>BIGKinds</strong><small>뉴스빅데이터 분석서비스</small></span></a>
+        <a className="site-brand" href="/"><span className="brand-tile">B</span><span><strong>BIG KINDS</strong><small>뉴스빅데이터 분석서비스</small></span></a>
         <a className="back-link" href="/">← 챗봇으로 돌아가기</a>
       </header>
       <section className="history-content">

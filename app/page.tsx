@@ -9,7 +9,7 @@ import { classifyPagePath, createPageContext, pageTypeLabels, PageContext } from
 import { buildSearchQuery, describeSearchQuery, SearchQueryInput } from "../lib/search-query-builder";
 import { detectDiagnosticKind, DiagnosticFlow, getDiagnosticFlow } from "../lib/diagnostic-flows";
 import { recordFeedback } from "../lib/feedback";
-import { detectSearchExpressionIntent, isDateQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
+import { detectSearchExpressionIntent, isArticleContentQuestion, isDateQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isQnaRankingQuestion, isSearchUsageQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
 import { generateRecommendedQuestions } from "../lib/recommendations";
 
 declare global {
@@ -30,21 +30,23 @@ type Message = {
   question?: string;
   apiRedirect?: boolean;
   searchQuery?: { value: string; description: string };
-  usedAi?: boolean;
+  usedSupplement?: boolean;
 };
 
 const welcomeMessage: Message = {
   id: 1,
   role: "assistant",
-  text: "안녕하세요. 빅카인즈 공식 자료를 바탕으로 뉴스 검색·분석과 이용 방법을 안내해 드릴게요. 궁금한 내용을 편하게 물어보세요.",
+  text: "안녕하세요. 빅카인즈 공식 Q&A·FAQ·소개·정책 문서를 바탕으로 뉴스 검색·분석 이용 방법을 안내해 드릴게요. 기사 원문 검색·요약은 지원하지 않으니 궁금한 이용 방법을 편하게 물어보세요.",
 };
 
 const LLM_USAGE_KEY = "bigkinds-llm-usage-v1";
 const LLM_DAILY_LIMIT = 20;
+const GUEST_USAGE_KEY = "bigkinds-guest-usage-v1";
+const GUEST_DAILY_LIMIT = 5;
 
 const categoryPrompts = [
-  { label: "뉴스 검색", question: "검색어는 어떤 방식으로 조합하나요?" },
-  { label: "Open API", question: "OPEN API 관련 문의는 어디로 해야 하나요?" },
+  { label: "검색 사용법", question: "검색어는 어떤 방식으로 조합하나요?" },
+  { label: "OPEN API", question: "OPEN API 관련 문의는 어디로 해야 하나요?" },
 ];
 
 const dataScriptPaths = [
@@ -137,6 +139,29 @@ function consumeLlmQuota() {
   }
 }
 
+function getGuestUsage() {
+  try {
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
+    const current = JSON.parse(window.localStorage.getItem(GUEST_USAGE_KEY) || "null") as { date?: string; count?: number } | null;
+    return current?.date === today ? Math.min(Number(current.count || 0), GUEST_DAILY_LIMIT) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function consumeGuestQuota() {
+  try {
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
+    const current = JSON.parse(window.localStorage.getItem(GUEST_USAGE_KEY) || "null") as { date?: string; count?: number } | null;
+    const count = current?.date === today ? Number(current.count || 0) : 0;
+    if (count >= GUEST_DAILY_LIMIT) return false;
+    window.localStorage.setItem(GUEST_USAGE_KEY, JSON.stringify({ date: today, count: count + 1 }));
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 type KnowledgeType = "qna" | "faq" | "intro" | "policy";
 
 type KnowledgeGroup = {
@@ -177,6 +202,7 @@ export default function Home() {
   const [showQueryBuilder, setShowQueryBuilder] = useState(false);
   const [showRecommendations, setShowRecommendations] = useState(true);
   const [recommendedQuestions, setRecommendedQuestions] = useState<string[]>(() => generateRecommendedQuestions("HOME", faqItems));
+  const [guestUsed, setGuestUsed] = useState(0);
   const [queryBuilder, setQueryBuilder] = useState<SearchQueryInput>({ any: [], all: [], exact: [], exclude: [] });
   const [queryBuilderText, setQueryBuilderText] = useState<Record<string, string>>({ any: "", all: "", exact: "", exclude: "" });
   const nextId = useRef(2);
@@ -188,6 +214,7 @@ export default function Home() {
     setChatOpen(isEmbed);
     setShowRecommendations(true);
     setPageContext(createPageContext(window.location.pathname));
+    setGuestUsed(getGuestUsage());
 
     const onContext = (event: MessageEvent) => {
       if (event.source !== window.parent || !event.data || event.data.type !== "bigkinds-chatbot-context") return;
@@ -290,8 +317,19 @@ export default function Home() {
   }
 
   function emitHostAction(action: { type: string; label?: string; url?: string; value?: string }) {
+    if (window.parent === window) {
+      if (action.type === "OPEN_URL" && action.url) window.open(action.url, "_blank", "noopener,noreferrer");
+      return;
+    }
     const parentOrigin = document.referrer ? (() => { try { return new URL(document.referrer).origin; } catch { return ""; } })() : "";
-    window.parent.postMessage({ type: "bigkinds-chatbot-action", action }, parentOrigin || "*");
+    const allowedOrigins = new Set([
+      "https://www.bigkinds.or.kr",
+      "https://bigkinds.or.kr",
+      "http://localhost:3000",
+      "http://localhost:3001",
+    ]);
+    if (!allowedOrigins.has(parentOrigin)) return;
+    window.parent.postMessage({ type: "bigkinds-chatbot-action", action }, parentOrigin);
   }
 
   async function copyText(value: string) {
@@ -338,9 +376,25 @@ export default function Home() {
     recordFeedback({ documentId: message?.matchedId, pageType: pageContext.pageType, rating: "down", reason });
   }
 
+  function retryQuestion(message: Message) {
+    if (message.question) ask(message.question);
+  }
+
   function ask(question: string) {
     const cleanQuestion = question.trim();
     if (!cleanQuestion || isTyping) return;
+
+    if (!consumeGuestQuota()) {
+      setMessages((current) => [...current, {
+        id: nextId.current++,
+        role: "assistant",
+        text: "로그인 없이 이용할 수 있는 오늘의 체험 5회를 모두 사용했습니다. 내일 다시 이용하거나, 빅카인즈 공식 사이트에 로그인해 계속 이용해 주세요.",
+        isFallback: true,
+      }]);
+      setGuestUsed(GUEST_DAILY_LIMIT);
+      return;
+    }
+    setGuestUsed((current) => Math.min(current + 1, GUEST_DAILY_LIMIT));
 
     const userMessage: Message = {
       id: nextId.current++,
@@ -380,7 +434,7 @@ export default function Home() {
           {
             id: nextId.current++,
             role: "assistant",
-            text: "요청하신 조건으로 BIGKinds 검색식을 만들었습니다.",
+            text: "요청하신 조건으로 BIG KINDS 검색식을 만들었습니다.",
             searchQuery: { value: searchExpressionIntent.query, description: searchExpressionIntent.description },
             question: cleanQuestion,
           },
@@ -420,6 +474,21 @@ export default function Home() {
         return;
       }
 
+      if (isQnaRankingQuestion(cleanQuestion)) {
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId.current++,
+            role: "assistant",
+            text: "저장된 Q&A 문서에는 조회수·추천수 같은 순위 정보가 없어 ‘가장 많이 묻는 Q&A Top 10’을 산정할 수 없습니다. 질문별 이용 빈도는 제공되지 않으므로, 아래 추천 질문이나 검색창에서 주제를 직접 찾아보세요.",
+            isFallback: true,
+            question: cleanQuestion,
+          },
+        ]);
+        setIsTyping(false);
+        return;
+      }
+
       if (isUnderspecifiedQuestion(cleanQuestion)) {
         setMessages((current) => [
           ...current,
@@ -427,6 +496,21 @@ export default function Home() {
             id: nextId.current++,
             role: "assistant",
             text: "어떤 주제의 예시가 필요한지 조금 더 알려주세요. 예를 들어 ‘검색식을 만드는 예시를 보여줘’처럼 질문해 주시면 저장된 공식 문서를 기준으로 안내하겠습니다.",
+            isFallback: true,
+            question: cleanQuestion,
+          },
+        ]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (isArticleContentQuestion(cleanQuestion)) {
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId.current++,
+            role: "assistant",
+            text: "이 챗봇에는 뉴스 기사 원문이 저장되어 있지 않아 특정 기사의 요약·본문·내용을 제공할 수 없습니다. 빅카인즈 사이트에서 기사를 직접 확인한 뒤, 검색·분석 이용 방법을 질문해 주세요.",
             isFallback: true,
             question: cleanQuestion,
           },
@@ -453,7 +537,14 @@ export default function Home() {
       const apiInquiry = isOpenApiQuestion(cleanQuestion) && !sensitive;
       const searchHelp = /검색식|검색어|연산자/i.test(cleanQuestion) && /어떻게|방법|사용|쓰|조합/i.test(cleanQuestion);
       const searchHelpDocument = searchHelp ? knowledge.find((item) => item.id === "official-faq-17") : undefined;
-      const results = searchHelpDocument ? [{ item: searchHelpDocument, score: 999 }] : searchFaq(cleanQuestion, 3, knowledge);
+      const searchUsageDocument = isSearchUsageQuestion(cleanQuestion)
+        ? knowledge.find((item) => item.id === "bigkinds-intro-overview")
+        : undefined;
+      const results = searchHelpDocument
+        ? [{ item: searchHelpDocument, score: 999 }]
+        : searchUsageDocument
+          ? [{ item: searchUsageDocument, score: 999 }]
+          : searchFaq(cleanQuestion, 3, knowledge);
       const privacyDocument = knowledge.find((item) => item.id === "privacy-security");
       const safeResults = sensitive && privacyDocument
         ? [{ item: privacyDocument, score: 999 }]
@@ -491,30 +582,30 @@ export default function Home() {
       } else {
         const answerModel = buildAnswerViewModel(best.item);
         const keywordAnswer = isKeywordSufficientMatch(cleanQuestion, best);
-        const aiAnswer = !sensitive && !keywordAnswer && consumeLlmQuota()
-          ? await requestLlmAnswer(cleanQuestion, safeResults)
+        const supplementAnswer = !sensitive && !keywordAnswer && consumeLlmQuota()
+          ? await requestLlmAnswer(cleanQuestion, safeResults, messages)
           : null;
         setMessages((current) => [
           ...current,
           {
             id: assistantId,
             role: "assistant",
-            text: aiAnswer || answerModel.summary,
+            text: supplementAnswer || answerModel.summary,
             matchedId: best.item.id,
             relatedIds: safeResults.slice(1).map((result) => result.item.id),
             answerModel,
             question: cleanQuestion,
-            usedAi: Boolean(aiAnswer),
+            usedSupplement: Boolean(supplementAnswer),
           },
         ]);
-        saveHistory(cleanQuestion, aiAnswer || best.item.answer, best.item);
+        saveHistory(cleanQuestion, supplementAnswer || best.item.answer, best.item);
       }
 
       setIsTyping(false);
     }, 420);
   }
 
-  async function requestLlmAnswer(question: string, results: Array<{ item: SearchableDocument; score: number }>) {
+  async function requestLlmAnswer(question: string, results: Array<{ item: SearchableDocument; score: number }>, history: Message[]) {
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -528,6 +619,7 @@ export default function Home() {
             effectiveDate: item.effectiveDate,
             score,
           })),
+          history: history.slice(-6).map((message) => ({ role: message.role, text: message.text })).filter((turn) => !/주민등록번호|비밀번호|인증키|api\s*key|apikey/i.test(turn.text)),
         }),
       });
       if (!response.ok) return null;
@@ -566,7 +658,7 @@ export default function Home() {
             <a className="site-brand" href={FAQ_SOURCE_URL} target="_blank" rel="noreferrer">
               <span className="brand-tile">B</span>
               <span>
-                <strong>BIGKinds</strong>
+                <strong>BIG KINDS</strong>
                 <small>뉴스빅데이터 분석서비스</small>
               </span>
             </a>
@@ -581,8 +673,8 @@ export default function Home() {
               <p className="section-label">BIG KINDS · 이용 Q&amp;A</p>
               <h1>빅카인즈 이용,<br />필요한 답부터 찾으세요.</h1>
               <p className="lead">
-                검색·Open API·데이터 이용 방법을 공식 안내와 Q&amp;A에서 찾아
-                이해하기 쉬운 답변으로 정리해 드립니다.
+                뉴스 검색·분석 이용 방법과 OPEN API 문의 경로를 공식 안내와 Q&amp;A에서 찾아
+                이해하기 쉬운 답변으로 정리해 드립니다. 기사 원문 검색·요약은 제공하지 않습니다.
               </p>
               <div className="metric-row" aria-label="프로토타입 특징">
               <div><strong>{faqCount}</strong><span>공식 FAQ</span></div>
@@ -660,8 +752,9 @@ export default function Home() {
               )}
               <div className="trust-note">
                 <span aria-hidden="true">✓</span>
-                <p><strong>공식 자료를 우선합니다.</strong> 근거가 없으면 추측하지 않습니다.</p>
+                <p><strong>공식 자료를 우선합니다.</strong> 근거가 없으면 추측하지 않습니다.<br />빅카인즈 Q&amp;A는 저장된 공식 문서를 기준으로 안내합니다.</p>
               </div>
+              <p className="guest-landing-note">로그인 없이 하루 최대 5회까지 체험해보세요.</p>
             </div>
 
             <aside className="flow-card" aria-label="답변 생성 흐름">
@@ -674,13 +767,13 @@ export default function Home() {
         </>
       )}
 
-      {(embedded || chatOpen) && <section className="chat-widget" aria-label="빅카인즈 이용 도우미">
+      {(embedded || chatOpen) && <section className="chat-widget" aria-label="빅카인즈 이용 도우미 · Q&A">
         <header className="chat-header">
           <div className="bot-identity">
             <span className="bot-avatar">B</span>
             <div>
-              <strong>빅카인즈 이용 도우미</strong>
-              <span><i /> {dataReady ? `${faqCount} FAQ · ${knowledge.length - faqCount} 정책/Q&A` : "공식 FAQ 연결 중"}</span>
+              <strong>빅카인즈 이용 도우미 · Q&amp;A</strong>
+              <span><i /> {dataReady ? `공식 문서 ${knowledge.length}건 · 기사 원문 0건` : "공식 문서 연결 중"}</span>
             </div>
           </div>
           <div className="header-actions">
@@ -706,15 +799,22 @@ export default function Home() {
 
         {showRecommendations && (
           <section className="recommendation-panel" aria-label="추천 질문">
-            <div className="recommendation-heading"><strong>지금 많이 묻는 질문</strong><span>열 때마다 새로 추천합니다</span></div>
+            <div className="recommendation-heading"><strong>지금 많이 묻는 질문</strong><span>페이지에 맞춰 추천합니다</span></div>
             <div className="recommendation-list">
               {recommendedQuestions.map((question) => <button key={question} type="button" onClick={() => ask(question)} disabled={isTyping}>{question}<span aria-hidden="true">›</span></button>)}
             </div>
+            <details className="question-guide">
+              <summary>질문을 더 정확하게 작성하는 방법</summary>
+              <p><strong>[시점] + [목표] + [형식] + [어투] + [지시어]</strong></p>
+              <div>
+                {["최근 한 달간 ○○ 관련 뉴스 검색 방법을 요약해줘", "A언론사와 B언론사의 검색 결과를 비교해줘", "이 문서를 요약하고 관련 검색 방법을 알려줘"].map((example) => <button key={example} type="button" onClick={() => { setQuery(example); }}>{example}</button>)}
+              </div>
+            </details>
           </section>
         )}
 
         {showQueryBuilder && (
-          <section className="query-builder" aria-label="BIGKinds 검색식 만들기">
+          <section className="query-builder" aria-label="BIG KINDS 검색식 만들기">
             <div className="query-builder-heading">
               <strong>추천 검색식</strong>
               <button type="button" onClick={() => setShowQueryBuilder(false)} aria-label="검색식 만들기 닫기">×</button>
@@ -738,13 +838,13 @@ export default function Home() {
               <button type="button" disabled={!builtSearchQuery} onClick={() => copyText(builtSearchQuery)}>검색식 복사</button>
               <button type="button" onClick={() => emitHostAction({ type: "OPEN_URL", label: "뉴스검색 화면 열기", url: "https://www.bigkinds.or.kr/v2/news/search.do" })}>뉴스검색 화면 열기</button>
             </div>
-            <small>BIGKinds 검색연산자는 AND, OR, NOT을 대문자로 입력합니다.</small>
+            <small>BIG KINDS 검색연산자는 AND, OR, NOT을 대문자로 입력합니다.</small>
           </section>
         )}
 
         <div className="conversation" aria-live="polite">
           <div className="day-divider"><span>오늘</span></div>
-          {messages.map((message, index) => {
+          {messages.map((message) => {
             const matched = message.matchedId
               ? knowledge.find((item) => item.id === message.matchedId)
               : undefined;
@@ -775,11 +875,13 @@ export default function Home() {
                   {matched && (
                     <div className="answer-meta">
                       <div className="source-meta">
+                      <strong className="source-heading">관련 공식 문서(출처)</strong>
                       <a href={matched?.source?.url ?? FAQ_SOURCE_URL} target="_blank" rel="noreferrer">
-                        공식 근거 확인 ↗
+                        {matched.title || matched.question} ↗
                       </a>
                       <span>{matched?.source?.label ?? "빅카인즈 공식 FAQ"}{matched?.source?.pages ? ` · ${matched.source.pages}` : ""}</span>
-                      {message.usedAi && <small className="authority-badge ai-badge">근거 기반 AI 보완</small>}
+                      <small className="source-guidance">정확한 정보는 위 공식 원문을 확인해 주세요.</small>
+                      {message.usedSupplement && <small className="authority-badge">공식 문서 기반 문장 보완</small>}
                       {matched?.authority && <small className="authority-badge">{matched.authority === "CURRENT_POLICY" ? "현행 정책" : matched.authority === "OFFICIAL_FAQ" ? "공식 FAQ" : matched.authority === "OFFICIAL_INTRO" ? "공식 소개" : matched.authority === "VERIFIED_QNA" ? "검증된 Q&A" : "과거 Q&A 참고"}{matched.status === "REVIEW_REQUIRED" ? " · 검토 필요" : ""}</small>}
                       {matched?.effectiveDate && <small className="effective-date">기준일 {matched.effectiveDate}</small>}
                     </div>
@@ -798,8 +900,16 @@ export default function Home() {
                           aria-label="도움이 안 됐어요"
                         >−</button>
                       </div>
+                      <div className="answer-tools" aria-label="답변 도구">
+                        <button type="button" onClick={() => copyText(message.text)}>답변 복사</button>
+                        {message.question && <button type="button" onClick={() => retryQuestion(message)} disabled={isTyping}>다시 답변</button>}
+                      </div>
                       {feedback[message.id] === "down" && <div className="feedback-reasons" role="group" aria-label="도움이 되지 않은 이유">{["답변이 틀렸어요", "정보가 오래됐어요", "질문과 다른 답이에요", "설명이 어려워요", "원하는 내용이 없어요"].map((reason) => <button type="button" key={reason} className={feedbackReasons[message.id] === reason ? "selected" : ""} onClick={() => handleFeedbackReason(message.id, reason)}>{reason}</button>)}</div>}
                     </div>
+                  )}
+
+                  {!matched && message.role === "assistant" && (
+                    <div className="answer-no-source">관련 기사를 찾지 못했습니다. 이 챗봇은 저장된 공식 문서 범위 밖의 내용을 추측하지 않습니다.</div>
                   )}
 
                   {(related.length > 0 || message.isFallback) && (
@@ -840,7 +950,8 @@ export default function Home() {
             />
             <button type="submit" disabled={!query.trim() || isTyping} aria-label="질문 보내기">↑</button>
           </div>
-          <p>FAQ 기반 자동 답변입니다. 중요한 내용은 공식 원문을 확인해 주세요.</p>
+          <p className="disclaimer">빅카인즈 Q&amp;A는 저장된 공식 Q&amp;A·FAQ·소개·정책 문서를 기준으로 안내합니다.<br />정확한 정보와 최신 내용은 출처로 함께 제공되는 공식 원문을 확인해 주세요.</p>
+          <p className="guest-note">로그인 없이 하루 최대 5회까지 체험할 수 있습니다. 오늘 남은 체험: {Math.max(0, GUEST_DAILY_LIMIT - guestUsed)}회</p>
         </form>
       </section>}
       {!embedded && !chatOpen && (

@@ -51,7 +51,7 @@ export function normalizeChatHistory(items: unknown): ChatHistoryItem[] {
         sourceUrl = "";
       } else if (isOpenApiQuestion(question)) {
         answer = API_REDIRECT_ANSWER;
-        category = "Open API";
+        category = "OPEN API";
         sourceUrl = OPEN_API_PURCHASE_URL;
       }
       return { ...item, question, answer, category, sourceUrl };

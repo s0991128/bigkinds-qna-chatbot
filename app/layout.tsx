@@ -7,8 +7,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
-  const title = "빅카인즈 이용 도우미";
-  const description = "빅카인즈 공식 FAQ 23건을 검색해 자연스럽게 안내하는 웹사이트 부착형 챗봇";
+  const title = "빅카인즈 Q&A";
+  const description = "빅카인즈 공식 Q&A·FAQ·소개·정책 문서를 근거로 이용 방법을 안내하는 웹사이트 부착형 챗봇";
 
   return {
     metadataBase: new URL(origin),

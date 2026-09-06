@@ -26,7 +26,7 @@ export function getDiagnosticFlow(kind: DiagnosticKind): DiagnosticFlow {
     { label: "다운로드 범위가 궁금해요", question: "다운로드할 때 기사 본문 전체를 받을 수 있나요?" },
   ] };
   return { kind, title: "API 문제 유형을 선택해 주세요.", options: [
-    { label: "신청 방법", question: "Open API 신청 방법" },
+    { label: "신청 방법", question: "OPEN API 신청 방법" },
     { label: "인증키 문제", question: "API 인증키가 작동하지 않아요" },
     { label: "호출 오류", question: "API 호출 오류가 발생했어요" },
   ] };

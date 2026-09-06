@@ -1,8 +1,8 @@
 window.BIGKINDS_CHATBOT_CONFIG = {
-  serviceName: "빅카인즈 챗봇",
-  assistantName: "빅카인즈 이용안내",
+  serviceName: "빅카인즈 Q&A",
+  assistantName: "빅카인즈 공식 Q&A",
   welcomeMessage:
-    "안녕하세요. 빅카인즈 뉴스 검색·분석, Open API, 요금·정책 및 이용방법을 안내해 드립니다.",
+    "안녕하세요. 빅카인즈 공식 문서를 바탕으로 뉴스 검색·분석 이용 방법을 안내해 드립니다. 기사 원문 검색·요약은 지원하지 않습니다.",
   notice:
     "빅카인즈 공식 FAQ와 Q&A를 기준으로 안내합니다. 확인이 필요한 사항은 담당자 문의로 연결해 드립니다.",
   theme: {
@@ -10,10 +10,9 @@ window.BIGKINDS_CHATBOT_CONFIG = {
     accent: "#f2c200"
   },
   suggestions: [
-    "뉴스 검색·분석은 어떻게 이용하나요?",
-    "Open API 서비스는 어떻게 신청하나요?",
-    "API 이용요금과 정책이 궁금합니다.",
-    "개인정보와 인증키를 입력해도 되나요?"
+    "뉴스 검색·분석 이용 방법이 궁금합니다.",
+    "검색식을 어떻게 만들 수 있나요?",
+    "OPEN API 문의는 어디로 하나요?"
   ],
   search: {
     minConfidence: 0.2,
@@ -35,10 +34,5 @@ window.BIGKINDS_CHATBOT_CONFIG = {
       "개인정보, 비밀번호, 인증키 등 민감한 정보는 입력하지 마세요.",
     blockedPatterns: ["주민등록번호", "비밀번호", "api key", "apikey", "인증키"]
   },
-  ai: {
-    enabled: false,
-    proxyEndpoint: "/api/chat",
-    timeoutMs: 12000
-  }
 };
 

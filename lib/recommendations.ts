@@ -62,6 +62,10 @@ function documentQuestion(document: SearchableDocument) {
   return value.length >= 8 && value.length <= 80 ? value : "";
 }
 
+function isHiddenRecommendation(value: string) {
+  return /요금|가격|비용|개인정보|개인 정보|비밀번호|인증키/i.test(value);
+}
+
 function shuffle<T>(values: T[]) {
   const copy = [...values];
   for (let index = copy.length - 1; index > 0; index -= 1) {
@@ -77,7 +81,8 @@ export function generateRecommendedQuestions(pageType: PageType, documents: Sear
     .filter((document) => document.authority === "OFFICIAL_FAQ" || document.authority === "CURRENT_POLICY")
     .map(documentQuestion)
     .filter(Boolean);
-  const pool = [...new Set([...pageCandidates, ...documentCandidates, ...fallbackPool])];
+  const pool = [...new Set([...pageCandidates, ...documentCandidates, ...fallbackPool])]
+    .filter((question) => !isHiddenRecommendation(question));
   let next = shuffle(pool).slice(0, 3);
   if (previous.length === 3 && next.join("|") === previous.join("|") && pool.length > 3) {
     next = [pool.find((item) => !previous.includes(item)) || next[0], ...next.slice(1)];

@@ -21,15 +21,15 @@ function textFromResponse(data){for(const item of data.output||[])for(const part
 
 async function chat(req,res){
   if(!allow(clientIp(req)))return json(res,429,{error:"요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."});
-  if(!process.env.OPENAI_API_KEY)return json(res,503,{error:"AI 연동이 비활성화되어 있습니다."});
+  if(!process.env.OPENAI_API_KEY)return json(res,503,{error:"문장 보완 연결이 비활성화되어 있습니다."});
   let payload;try{payload=await body(req)}catch{return json(res,400,{error:"잘못된 요청입니다."})}
   const question=String(payload.question||"").trim().slice(0,500),sources=Array.isArray(payload.sources)?payload.sources.slice(0,3):[];
   if(!question||!sources.length)return json(res,400,{error:"질문 또는 검색 근거가 없습니다."});
   const evidence=sources.map((s,i)=>`[${i+1}] ${s.title}\n${s.answer}\n기준일: ${s.effectiveDate||"미확인"}`).join("\n\n");
   const instructions=["당신은 빅카인즈 공식 Q&A 안내봇입니다.","반드시 제공된 근거 안에서만 한국어로 답변하세요.","근거에 금액·날짜가 없으면 추정하지 말고 담당자 확인이 필요하다고 말하세요.","API 유료화 질문은 적용 대상, 무료 구간, 초과 단가, 부가세, 적용일을 근거에 있을 때만 답하세요.","비밀번호·인증키·주민등록번호 등 민감정보 입력을 요구하지 마세요.","간결하고 실행 가능한 답변을 제공하세요."].join("\n");
-  let upstream;try{upstream=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{authorization:`Bearer ${process.env.OPENAI_API_KEY}`,"content-type":"application/json"},body:JSON.stringify({model,instructions,input:`질문:\n${question}\n\n검색 근거:\n${evidence}`,store:false,max_output_tokens:500})})}catch{return json(res,502,{error:"AI 서비스에 연결할 수 없습니다."})}
-  if(!upstream.ok)return json(res,502,{error:"AI 답변 생성에 실패했습니다."});
-  const data=await upstream.json(),answer=textFromResponse(data);if(!answer)return json(res,502,{error:"AI 답변이 비어 있습니다."});
+  let upstream;try{upstream=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{authorization:`Bearer ${process.env.OPENAI_API_KEY}`,"content-type":"application/json"},body:JSON.stringify({model,instructions,input:`질문:\n${question}\n\n검색 근거:\n${evidence}`,store:false,max_output_tokens:500})})}catch{return json(res,502,{error:"문장 보완 서비스에 연결할 수 없습니다."})}
+  if(!upstream.ok)return json(res,502,{error:"문장 보완 생성에 실패했습니다."});
+  const data=await upstream.json(),answer=textFromResponse(data);if(!answer)return json(res,502,{error:"문장 보완 결과가 비어 있습니다."});
   return json(res,200,{answer,category:sources[0]?.title||"기타",escalate:sources[0]?.effectiveDate==="검수 필요"});
 }
 

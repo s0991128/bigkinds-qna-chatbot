@@ -17,11 +17,13 @@
       :host { all: initial; }
       .bk-launcher {
         position: fixed; right: 24px; bottom: 24px; z-index: 2147483646;
-        width: 58px; height: 58px; display: grid; place-items: center;
+        width: 58px; height: 58px; display: inline-flex; align-items: center; justify-content: center;
+        box-sizing: border-box; padding: 0;
         border: 0; border-radius: 19px; cursor: pointer;
         color: #fff; background: linear-gradient(145deg, #2875ed, #104db9);
         box-shadow: 0 14px 34px rgba(16, 64, 145, .32);
-        font: 900 24px/1 Arial, sans-serif;
+        font: 900 24px/1 Arial, "Noto Sans KR", sans-serif;
+        letter-spacing: 0; text-indent: 0; text-align: center;
       }
       .bk-launcher:hover { transform: translateY(-2px); }
       .bk-launcher:focus-visible { outline: 3px solid rgba(40,117,237,.4); outline-offset: 3px; }
