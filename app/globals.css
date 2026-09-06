@@ -81,7 +81,10 @@ button { -webkit-tap-highlight-color: transparent; }
 .metric-row strong { display: block; color: var(--navy-900); font-size: 25px; letter-spacing: -.04em; }
 .metric-row span { display: block; margin-top: 4px; color: #728096; font-size: 12px; }
 .knowledge-breakdown { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; max-width: 720px; margin-top: 30px; }
-.knowledge-card { min-height: 82px; display: flex; flex-direction: column; justify-content: space-between; padding: 11px 12px; border: 1px solid #dbe4ef; border-radius: 12px; background: rgba(255,255,255,.7); }
+.knowledge-card { min-height: 82px; display: flex; flex-direction: column; justify-content: space-between; padding: 11px 12px; border: 1px solid #dbe4ef; border-radius: 12px; background: rgba(255,255,255,.7); color: inherit; text-align: left; cursor: pointer; transition: transform .18s, box-shadow .18s, border-color .18s; }
+.knowledge-card:hover:not(:disabled), .knowledge-card.selected { transform: translateY(-2px); box-shadow: 0 9px 22px rgba(24,50,83,.10); }
+.knowledge-card:disabled { cursor: wait; opacity: .72; }
+.knowledge-card.selected { outline: 3px solid rgba(40,117,237,.13); outline-offset: 1px; }
 .knowledge-card > span { color: #52627a; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .knowledge-card strong { margin-top: 6px; color: var(--navy-900); font-size: 19px; letter-spacing: -.04em; }
 .knowledge-card small { margin-top: 3px; color: #8592a3; font-size: 9px; line-height: 1.35; white-space: nowrap; }
@@ -93,6 +96,31 @@ button { -webkit-tap-highlight-color: transparent; }
 .knowledge-card-intro > span { color: #a46b0a; }
 .knowledge-card-policy { border-color: #ddd0f6; background: #faf7ff; }
 .knowledge-card-policy > span { color: #6d4aaa; }
+.knowledge-detail-hint { margin: 13px 0 0; color: #75849a; font-size: 11px; line-height: 1.6; }
+.knowledge-detail { max-width: 760px; margin-top: 18px; border: 1px solid #d6e0ec; border-radius: 18px; background: rgba(255,255,255,.86); box-shadow: 0 18px 42px rgba(28,52,83,.08); overflow: hidden; }
+.knowledge-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px; border-bottom: 1px solid #e3e9f1; background: #fbfcff; }
+.knowledge-detail-header .section-label { margin-bottom: 7px; font-size: 10px; }
+.knowledge-detail-header h2 { margin: 0; color: var(--navy-900); font-size: 21px; letter-spacing: -.04em; }
+.knowledge-detail-header p:not(.section-label) { margin: 5px 0 0; color: #7a889a; font-size: 11px; }
+.knowledge-detail-close { flex: 0 0 auto; padding: 7px 10px; border: 1px solid #ccd8e6; border-radius: 8px; background: white; color: #52647c; cursor: pointer; font-size: 11px; }
+.knowledge-detail-close:hover { border-color: #8eafe0; color: var(--blue-600); }
+.knowledge-detail-body { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(0, 1.4fr); min-height: 300px; }
+.knowledge-document-list { max-height: 430px; overflow-y: auto; padding: 10px; border-right: 1px solid #e3e9f1; background: #f6f9fd; scrollbar-width: thin; }
+.knowledge-document-list button { width: 100%; display: grid; gap: 5px; padding: 11px 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: #34465f; text-align: left; cursor: pointer; }
+.knowledge-document-list button:hover, .knowledge-document-list button.active { border-color: #b8d0f5; background: white; color: var(--blue-600); }
+.knowledge-document-list button span { color: #8997a9; font-size: 9px; }
+.knowledge-document-list button strong { font-size: 11px; line-height: 1.45; }
+.knowledge-document-detail { padding: 21px 22px 24px; background: white; }
+.knowledge-document-category { display: inline-flex; padding: 4px 7px; border-radius: 6px; background: var(--blue-100); color: #1859bf; font-size: 10px; font-weight: 800; }
+.knowledge-document-detail h3 { margin: 11px 0 13px; color: var(--navy-900); font-size: 18px; line-height: 1.45; letter-spacing: -.03em; }
+.knowledge-document-answer { margin: 0; color: #4d5d74; white-space: pre-line; word-break: keep-all; font-size: 12px; line-height: 1.8; }
+.knowledge-document-block { margin-top: 17px; padding-top: 14px; border-top: 1px solid #edf1f5; color: #53647b; font-size: 11px; line-height: 1.65; }
+.knowledge-document-block strong { color: var(--navy-900); }
+.knowledge-document-block ul, .knowledge-document-block ol { margin: 8px 0 0; padding-left: 18px; }
+.knowledge-document-block li::marker { color: var(--blue-500); }
+.knowledge-document-source { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 19px; padding-top: 12px; border-top: 1px solid #edf1f5; color: #8a97a8; font-size: 10px; }
+.knowledge-document-source a { color: #3266a8; font-weight: 800; text-decoration: none; }
+.knowledge-document-source a:hover { text-decoration: underline; }
 .trust-note { width: fit-content; display: flex; gap: 12px; align-items: center; margin-top: 38px; padding: 14px 17px; border: 1px solid #dce4ee; border-radius: 14px; background: rgba(255,255,255,.72); }
 .trust-note > span { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 50%; background: #dff5e9; color: #16834c; font-weight: 850; }
 .trust-note p { margin: 0; color: #536077; font-size: 12px; line-height: 1.5; }
@@ -242,6 +270,9 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
   .metric-row { gap: 20px; flex-wrap: wrap; }
   .knowledge-breakdown { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 100%; margin-top: 26px; }
   .knowledge-card { min-height: 76px; }
+  .knowledge-detail-body { grid-template-columns: 1fr; }
+  .knowledge-document-list { max-height: 190px; border-right: 0; border-bottom: 1px solid #e3e9f1; }
+  .knowledge-document-detail { padding: 18px; }
   .trust-note { align-items: flex-start; }
   .chat-widget { right: 12px; bottom: 12px; width: calc(100vw - 24px); height: min(630px, calc(100vh - 92px)); border-radius: 22px; }
   .page-launcher { right: 14px; bottom: 14px; width: 58px; height: 58px; border-radius: 19px; }

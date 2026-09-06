@@ -81,12 +81,26 @@ function normalizeKnowledgeDocument(document: SearchableDocument): SearchableDoc
 
 type KnowledgeType = "qna" | "faq" | "intro" | "policy";
 
+type KnowledgeGroup = {
+  key: KnowledgeType;
+  label: string;
+  description: string;
+  count: number;
+};
+
 function getKnowledgeType(document: SearchableDocument): KnowledgeType {
   if (document.id.startsWith("qna-")) return "qna";
   if (document.id.startsWith("official-faq-")) return "faq";
   if (document.id.startsWith("bigkinds-intro-")) return "intro";
   return "policy";
 }
+
+const knowledgeTypeMeta: Record<KnowledgeType, { label: string; description: string }> = {
+  qna: { label: "공식 Q&A", description: "운영지원 답변" },
+  faq: { label: "공식 FAQ", description: "자주 묻는 질문" },
+  intro: { label: "빅카인즈 소개", description: "서비스·데이터 안내" },
+  policy: { label: "정책·사용법", description: "API·저작권·이용 기준" },
+};
 
 function conciseAnswer(value: string) {
   const paragraphs = formatAnswer(value)
@@ -113,6 +127,8 @@ export default function Home() {
   const [isTyping, setIsTyping] = useState(false);
   const [embedded, setEmbedded] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [selectedKnowledgeType, setSelectedKnowledgeType] = useState<KnowledgeType | null>(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [knowledge, setKnowledge] = useState<SearchableDocument[]>(faqItems);
   const [dataReady, setDataReady] = useState(false);
   const [feedback, setFeedback] = useState<Record<number, "up" | "down">>({});
@@ -167,13 +183,36 @@ export default function Home() {
       { qna: 0, faq: 0, intro: 0, policy: 0 },
     );
 
-    return [
-      { key: "qna" as const, label: "공식 Q&A", description: "운영지원 답변", count: counts.qna },
-      { key: "faq" as const, label: "공식 FAQ", description: "자주 묻는 질문", count: counts.faq },
-      { key: "intro" as const, label: "빅카인즈 소개", description: "서비스·데이터 안내", count: counts.intro },
-      { key: "policy" as const, label: "정책·사용법", description: "API·저작권·이용 기준", count: counts.policy },
-    ];
+    return (Object.keys(knowledgeTypeMeta) as KnowledgeType[]).map((key) => ({
+      key,
+      ...knowledgeTypeMeta[key],
+      count: counts[key],
+    }));
   }, [knowledge]);
+
+  const selectedKnowledgeGroup = useMemo(
+    () => knowledgeGroups.find((group) => group.key === selectedKnowledgeType) ?? null,
+    [knowledgeGroups, selectedKnowledgeType],
+  );
+
+  const selectedDocuments = useMemo(
+    () => selectedKnowledgeType
+      ? knowledge.filter((document) => getKnowledgeType(document) === selectedKnowledgeType)
+      : [],
+    [knowledge, selectedKnowledgeType],
+  );
+
+  const selectedDocument = useMemo(
+    () => selectedDocuments.find((document) => document.id === selectedDocumentId) ?? selectedDocuments[0],
+    [selectedDocumentId, selectedDocuments],
+  );
+
+  function openKnowledgeGroup(group: KnowledgeGroup) {
+    if (!dataReady || group.count === 0) return;
+    setSelectedKnowledgeType(group.key);
+    const firstDocument = knowledge.find((document) => getKnowledgeType(document) === group.key);
+    setSelectedDocumentId(firstDocument?.id ?? null);
+  }
 
   function ask(question: string) {
     const cleanQuestion = question.trim();
@@ -275,13 +314,73 @@ export default function Home() {
               </div>
               <div className="knowledge-breakdown" aria-label="검색 문서 유형">
                 {knowledgeGroups.map((group) => (
-                  <div className={`knowledge-card knowledge-card-${group.key}`} key={group.key}>
+                  <button
+                    className={`knowledge-card knowledge-card-${group.key} ${selectedKnowledgeType === group.key ? "selected" : ""}`}
+                    key={group.key}
+                    type="button"
+                    onClick={() => openKnowledgeGroup(group)}
+                    disabled={!dataReady || group.count === 0}
+                    aria-pressed={selectedKnowledgeType === group.key}
+                  >
                     <span>{group.label}</span>
                     <strong>{dataReady ? group.count : "···"}</strong>
                     <small>{group.description}</small>
-                  </div>
+                  </button>
                 ))}
               </div>
+              {!selectedKnowledgeGroup && (
+                <p className="knowledge-detail-hint">문서 유형을 선택하면 실제 검색문서와 상세 내용을 한 화면에서 확인할 수 있습니다.</p>
+              )}
+              {selectedKnowledgeGroup && selectedDocument && (
+                <section className="knowledge-detail" aria-label={`${selectedKnowledgeGroup.label} 상세 내용`}>
+                  <div className="knowledge-detail-header">
+                    <div>
+                      <p className="section-label">검색 문서 상세</p>
+                      <h2>{selectedKnowledgeGroup.label}</h2>
+                      <p>{selectedKnowledgeGroup.count}건의 {selectedKnowledgeGroup.description} 문서</p>
+                    </div>
+                    <button className="knowledge-detail-close" type="button" onClick={() => setSelectedKnowledgeType(null)}>닫기</button>
+                  </div>
+                  <div className="knowledge-detail-body">
+                    <div className="knowledge-document-list" aria-label="문서 목록">
+                      {selectedDocuments.map((document) => (
+                        <button
+                          key={document.id}
+                          type="button"
+                          className={selectedDocument.id === document.id ? "active" : ""}
+                          onClick={() => setSelectedDocumentId(document.id)}
+                        >
+                          <span>{document.category}</span>
+                          <strong>{document.title || document.question}</strong>
+                        </button>
+                      ))}
+                    </div>
+                    <article className="knowledge-document-detail">
+                      <span className="knowledge-document-category">{selectedDocument.category}</span>
+                      <h3>{selectedDocument.title || selectedDocument.question}</h3>
+                      <p className="knowledge-document-answer">{formatAnswer(selectedDocument.answer)}</p>
+                      {selectedDocument.facts && selectedDocument.facts.length > 0 && (
+                        <div className="knowledge-document-block">
+                          <strong>핵심 사실</strong>
+                          <ul>{selectedDocument.facts.map((fact) => <li key={fact}>{fact}</li>)}</ul>
+                        </div>
+                      )}
+                      {selectedDocument.steps && selectedDocument.steps.length > 0 && (
+                        <div className="knowledge-document-block">
+                          <strong>이용 순서</strong>
+                          <ol>{selectedDocument.steps.map((step) => <li key={step}>{step}</li>)}</ol>
+                        </div>
+                      )}
+                      <div className="knowledge-document-source">
+                        <span>기준일 {selectedDocument.effectiveDate || "-"}</span>
+                        {selectedDocument.source?.url ? (
+                          <a href={selectedDocument.source.url} target="_blank" rel="noreferrer">공식 원문 확인 ↗</a>
+                        ) : <span>{selectedDocument.source?.label || "공식 자료"}</span>}
+                      </div>
+                    </article>
+                  </div>
+                </section>
+              )}
               <div className="trust-note">
                 <span aria-hidden="true">✓</span>
                 <p><strong>공식 자료를 우선합니다.</strong> 근거가 없으면 추측하지 않습니다.</p>
