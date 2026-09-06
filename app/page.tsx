@@ -78,6 +78,16 @@ function normalizeKnowledgeDocument(document: SearchableDocument): SearchableDoc
     answer: document.answer || "공식 답변을 확인해 주세요.",
   };
 }
+
+type KnowledgeType = "qna" | "faq" | "intro" | "policy";
+
+function getKnowledgeType(document: SearchableDocument): KnowledgeType {
+  if (document.id.startsWith("qna-")) return "qna";
+  if (document.id.startsWith("official-faq-")) return "faq";
+  if (document.id.startsWith("bigkinds-intro-")) return "intro";
+  return "policy";
+}
+
 function conciseAnswer(value: string) {
   const paragraphs = formatAnswer(value)
     .split(/\n{2,}/)
@@ -146,6 +156,24 @@ export default function Home() {
     () => knowledge.filter((item) => item.id.startsWith("official-faq-")).length || 23,
     [knowledge],
   );
+
+  const knowledgeGroups = useMemo(() => {
+    const counts = knowledge.reduce<Record<KnowledgeType, number>>(
+      (result, document) => {
+        const type = getKnowledgeType(document);
+        result[type] += 1;
+        return result;
+      },
+      { qna: 0, faq: 0, intro: 0, policy: 0 },
+    );
+
+    return [
+      { key: "qna" as const, label: "공식 Q&A", description: "운영지원 답변", count: counts.qna },
+      { key: "faq" as const, label: "공식 FAQ", description: "자주 묻는 질문", count: counts.faq },
+      { key: "intro" as const, label: "빅카인즈 소개", description: "서비스·데이터 안내", count: counts.intro },
+      { key: "policy" as const, label: "정책·사용법", description: "API·저작권·이용 기준", count: counts.policy },
+    ];
+  }, [knowledge]);
 
   function ask(question: string) {
     const cleanQuestion = question.trim();
@@ -244,6 +272,15 @@ export default function Home() {
               <div><strong>{faqCount}</strong><span>공식 FAQ</span></div>
                 <div><strong>{knowledge.length}</strong><span>검색 문서</span></div>
                 <div><strong>0건</strong><span>기사 본문 저장</span></div>
+              </div>
+              <div className="knowledge-breakdown" aria-label="검색 문서 유형">
+                {knowledgeGroups.map((group) => (
+                  <div className={`knowledge-card knowledge-card-${group.key}`} key={group.key}>
+                    <span>{group.label}</span>
+                    <strong>{dataReady ? group.count : "···"}</strong>
+                    <small>{group.description}</small>
+                  </div>
+                ))}
               </div>
               <div className="trust-note">
                 <span aria-hidden="true">✓</span>

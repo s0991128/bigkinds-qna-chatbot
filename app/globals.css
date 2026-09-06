@@ -80,6 +80,19 @@ button { -webkit-tap-highlight-color: transparent; }
 .metric-row div::before { content: ""; position: absolute; top: 4px; bottom: 4px; left: 0; width: 3px; border-radius: 3px; background: var(--blue-500); }
 .metric-row strong { display: block; color: var(--navy-900); font-size: 25px; letter-spacing: -.04em; }
 .metric-row span { display: block; margin-top: 4px; color: #728096; font-size: 12px; }
+.knowledge-breakdown { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; max-width: 720px; margin-top: 30px; }
+.knowledge-card { min-height: 82px; display: flex; flex-direction: column; justify-content: space-between; padding: 11px 12px; border: 1px solid #dbe4ef; border-radius: 12px; background: rgba(255,255,255,.7); }
+.knowledge-card > span { color: #52627a; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.knowledge-card strong { margin-top: 6px; color: var(--navy-900); font-size: 19px; letter-spacing: -.04em; }
+.knowledge-card small { margin-top: 3px; color: #8592a3; font-size: 9px; line-height: 1.35; white-space: nowrap; }
+.knowledge-card-qna { border-color: #bcd4fb; background: #f3f7ff; }
+.knowledge-card-qna > span { color: #2365c4; }
+.knowledge-card-faq { border-color: #c8e7d7; background: #f4fbf7; }
+.knowledge-card-faq > span { color: #238254; }
+.knowledge-card-intro { border-color: #f1dcae; background: #fffaf0; }
+.knowledge-card-intro > span { color: #a46b0a; }
+.knowledge-card-policy { border-color: #ddd0f6; background: #faf7ff; }
+.knowledge-card-policy > span { color: #6d4aaa; }
 .trust-note { width: fit-content; display: flex; gap: 12px; align-items: center; margin-top: 38px; padding: 14px 17px; border: 1px solid #dce4ee; border-radius: 14px; background: rgba(255,255,255,.72); }
 .trust-note > span { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 50%; background: #dff5e9; color: #16834c; font-weight: 850; }
 .trust-note p { margin: 0; color: #536077; font-size: 12px; line-height: 1.5; }
@@ -227,6 +240,8 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
   .demo-copy h1 { font-size: clamp(38px, 12vw, 58px); }
   .lead { font-size: 15px; }
   .metric-row { gap: 20px; flex-wrap: wrap; }
+  .knowledge-breakdown { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 100%; margin-top: 26px; }
+  .knowledge-card { min-height: 76px; }
   .trust-note { align-items: flex-start; }
   .chat-widget { right: 12px; bottom: 12px; width: calc(100vw - 24px); height: min(630px, calc(100vh - 92px)); border-radius: 22px; }
   .page-launcher { right: 14px; bottom: 14px; width: 58px; height: 58px; border-radius: 19px; }
