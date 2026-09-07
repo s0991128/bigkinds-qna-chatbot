@@ -9,7 +9,7 @@ import { classifyPagePath, createPageContext, pageTypeLabels, PageContext } from
 import { buildSearchQuery, describeSearchQuery, SearchQueryInput } from "../lib/search-query-builder";
 import { detectDiagnosticKind, DiagnosticFlow, getDiagnosticFlow } from "../lib/diagnostic-flows";
 import { recordFeedback } from "../lib/feedback";
-import { detectSearchExpressionIntent, isApiCommercialQuestion, isApiErrorQuestion, isArticleContentQuestion, isBroadServiceQuestion, isChatbotMetaQuestion, isDateQuestion, isEscalationQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isQnaRankingQuestion, isSearchUsageQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
+import { detectSearchExpressionIntent, getDirectFaqId, isApiCommercialQuestion, isApiErrorQuestion, isArticleContentQuestion, isArticleDownloadMethodQuestion, isBroadServiceQuestion, isChatbotMetaQuestion, isDateQuestion, isEscalationQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isQnaRankingQuestion, isSearchUsageQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
 import { generateRecommendedQuestions } from "../lib/recommendations";
 import { applyKnowledgeAuthority } from "../lib/knowledge-authority";
 import { assessPrivacy } from "../lib/privacy";
@@ -426,6 +426,43 @@ export default function Home() {
         ]);
         setIsTyping(false);
         return;
+      }
+
+      if (isArticleDownloadMethodQuestion(cleanQuestion)) {
+        const downloadDocument = knowledge.find((item) => item.id === "official-faq-18");
+        if (downloadDocument) {
+          const answerModel = buildAnswerViewModel(downloadDocument);
+          setMessages((current) => [...current, {
+            id: nextId.current++,
+            role: "assistant",
+            text: answerModel.summary,
+            matchedId: downloadDocument.id,
+            answerModel,
+            question: cleanQuestion,
+          }]);
+          saveHistory(cleanQuestion, downloadDocument.answer, downloadDocument);
+          setIsTyping(false);
+          return;
+        }
+      }
+
+      const directFaqId = getDirectFaqId(cleanQuestion);
+      if (directFaqId) {
+        const directDocument = knowledge.find((item) => item.id === directFaqId);
+        if (directDocument) {
+          const answerModel = buildAnswerViewModel(directDocument);
+          setMessages((current) => [...current, {
+            id: nextId.current++,
+            role: "assistant",
+            text: answerModel.summary,
+            matchedId: directDocument.id,
+            answerModel,
+            question: cleanQuestion,
+          }]);
+          saveHistory(cleanQuestion, directDocument.answer, directDocument);
+          setIsTyping(false);
+          return;
+        }
       }
 
       if (isArticleContentQuestion(cleanQuestion)) {

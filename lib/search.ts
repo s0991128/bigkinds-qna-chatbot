@@ -26,6 +26,8 @@ const synonymGroups = [
   ["오류", "에러", "안돼", "안됨", "작동안함", "문제"],
   ["검색법", "검색식", "검색방법", "연산자"],
   ["옛날", "과거", "이전", "오래된", "고신문"],
+  ["나눠", "나누", "구분", "분리"],
+  ["메일", "이메일"],
   ["휴대폰", "스마트폰", "모바일"],
   ["인용", "논문", "출판", "저작권", "출처"],
   ["비용", "요금", "가격", "과금", "유료", "결제"],
@@ -67,7 +69,7 @@ export function searchFaq(query: string, limit = 8, documents: SearchableDocumen
     .split(" ")
     .flatMap((term) => [term, term.replace(/[은는이가을를의에로으로]$/g, "")])
     .filter((term, index, terms) => term.length >= 2 && terms.indexOf(term) === index);
-  const genericTerms = new Set(["전체", "내용", "질문", "예시", "예시를", "어떤", "무엇", "방법", "알려", "알려줘", "해주세요", "해줘", "들어", "들어줘", "해야", "너한테는", "뭐", "좀"]);
+  const genericTerms = new Set(["전체", "내용", "질문", "예시", "예시를", "어떤", "무엇", "방법", "알려", "알려줘", "해주세요", "해줘", "들어", "들어줘", "해야", "너한테는", "뭐", "좀", "어떻게", "하려면", "가능한가요", "가능", "싶어", "있어", "왜", "대해"]);
   const meaningfulTerms = lexicalTerms.filter((term) => !genericTerms.has(term));
   const terms = [...new Set([...expandedTerms(query), ...lexicalTerms])];
 

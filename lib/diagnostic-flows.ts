@@ -7,7 +7,7 @@ export type DiagnosticFlow = { kind: DiagnosticKind; title: string; options: Dia
 export function detectDiagnosticKind(question: string, pageType: PageType): DiagnosticKind | null {
   const text = question.toLowerCase();
   if (/검색결과|검색이 안|결과가 없|검색 안|검색이 되지|검색 버튼/.test(text) && (pageType === "NEWS_SEARCH" || /검색|결과/.test(text))) return "SEARCH_NO_RESULT";
-  if (/다운로드|내려받|엑셀|파일.*안/.test(text)) return "DOWNLOAD_PROBLEM";
+  if (/(?:다운로드|내려받|엑셀|파일).*(?:안|실패|오류|문제|열리|못)/.test(text) || /(?:안|못).*(?:다운로드|내려받|엑셀|파일)/.test(text)) return "DOWNLOAD_PROBLEM";
   if ((pageType === "OPEN_API" && /(안|오류|에러|문제|인증키)/.test(text)) || /api.*(안|오류|에러|문제)|인증키/.test(text)) return "API_ERROR";
   return null;
 }

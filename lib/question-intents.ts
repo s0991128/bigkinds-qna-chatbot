@@ -60,7 +60,8 @@ export function detectSearchExpressionIntent(question: string): SearchExpression
 }
 
 export function isDateQuestion(question: string) {
-  return /(?:오늘|현재)\s*(?:은|이|의)?\s*(?:몇\s*월\s*며칠|몇\s*일|날짜|일자)|오늘\s*날짜/i.test(question);
+  if (/(검색|뉴스|기사|기간|조회)/i.test(question)) return false;
+  return /(?:오늘|현재)\s*(?:은|이|의)?\s*(?:몇\s*월\s*며칠|몇\s*일|날짜|일자)|오늘\s*(?:며칠|몇\s*일)/i.test(question);
 }
 
 export function isChatbotMetaQuestion(question: string) {
@@ -85,9 +86,23 @@ export function isQnaRankingQuestion(question: string) {
 }
 
 export function isSearchUsageQuestion(question: string) {
-  const hasSearchTopic = /뉴스\s*(?:검색|검색·분석)|검색·분석|뉴스검색/i.test(question);
+  const hasSearchTopic = /뉴스\s*(?:검색|검색·분석)|검색·분석|뉴스검색|검색어|검색식|오늘|날짜|기간/i.test(question);
   const asksHow = /이용|방법|시작|어떻게|알려|순서|사용/i.test(question);
   return hasSearchTopic && asksHow;
+}
+
+export function getDirectFaqId(question: string) {
+  if (/회원가입/.test(question) && /메일|이메일/.test(question) && /안|못|받지|오지|누락/.test(question)) return "official-faq-33";
+  if (/(?:90년대|1990년대|고신문|아카이브)/.test(question) && /어디까지|언제부터|검색|있어|가능/.test(question)) return "official-faq-19";
+  if (/(?:과거|최신).*(?:기사|뉴스)|기사.*(?:과거|최신)/.test(question) && /검색|나눠|구분|분리/.test(question)) return "official-faq-29";
+  if (/검색어/.test(question) && /괄호/.test(question)) return "official-faq-17";
+  if (/문장/.test(question) && /검색/.test(question) && /그대로|포함|정확/.test(question)) return "official-faq-13";
+  return null;
+}
+
+export function isDownloadProblemQuestion(question: string) {
+  return /(?:다운로드|내려받|엑셀|파일).*(?:안|실패|오류|문제|열리|못)/i.test(question)
+    || /(?:안|못).*(?:다운로드|내려받|엑셀|파일)/i.test(question);
 }
 
 export function isUnderspecifiedQuestion(question: string) {
@@ -130,6 +145,13 @@ export function isArticleContentQuestion(question: string) {
   const hasArticle = /기사|뉴스|원문|본문/i.test(question);
   const asksForContent = /요약|정리|전문을?|본문\s*(?:전체|전문)?\s*(?:보여|읽|가져|전달)|내용을?\s*(?:알려|보여|정리)|분석해|핵심만/i.test(question);
   return hasArticle && asksForContent;
+}
+
+export function isArticleDownloadMethodQuestion(question: string) {
+  const hasArticle = /기사|뉴스|본문/i.test(question);
+  const hasDownload = /다운로드|내려받|엑셀|파일/i.test(question);
+  const asksMethod = /방법|어떻게|받을|받는|내려받/i.test(question);
+  return hasArticle && hasDownload && asksMethod && !/본문\s*(?:전체|전문)?\s*(?:보여|읽|가져|전달)/i.test(question);
 }
 
 export function todayInKorea() {

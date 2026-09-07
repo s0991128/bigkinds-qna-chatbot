@@ -14,7 +14,7 @@
 ></script>
 ```
 
-staging origin은 `https://bigkinds-qna-chatbot--staging.kpf.axhub.ai`를 기준으로 검증합니다. 최종 운영 origin은 `UNKNOWN / 배포 담당자 확인 필요`입니다.
+staging origin은 AxHub 배포 검증 응답에서 URL이 제공되지 않아 `UNKNOWN / AxHub 배포 담당자 확인 필요`입니다. `https://bigkinds-qna-chatbot--staging.kpf.axhub.ai`는 후보 주소로 확인했지만 챗봇 앱이 아닌 AxHub 콘솔 shell을 반환하므로 실제 삽입 origin으로 사용하지 않습니다. 최종 운영 origin도 `UNKNOWN / 배포 담당자 확인 필요`입니다.
 
 ## 2. 보안·브라우저 계약
 
