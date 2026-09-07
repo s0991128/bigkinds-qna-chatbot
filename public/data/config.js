@@ -15,8 +15,6 @@ window.BIGKINDS_CHATBOT_CONFIG = {
     "OPEN API 문의는 어디로 하나요?"
   ],
   search: {
-    minConfidence: 0.2,
-    escalationConfidence: 0.13,
     maxSources: 3
   },
   escalation: {

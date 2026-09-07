@@ -1,3 +1,4 @@
+/* eslint-disable no-useless-escape */
 import { buildSearchQuery, describeSearchQuery, SearchQueryInput } from "./search-query-builder";
 
 export type SearchExpressionIntent = {
@@ -11,6 +12,7 @@ const stopWords = new Set([
   "검색", "검색식", "검색어", "키워드", "단어", "조건", "기사", "뉴스", "만들", "만들어", "만들어줘", "작성", "작성해", "작성해줘",
   "생성", "생성해", "생성해줘", "구성", "구성해", "구성해줘", "짜", "짜줘", "포함", "포함한", "포함하는", "동시에", "함께",
   "알려", "알려줘", "해주세요", "해줘", "주세요", "원해", "싶어", "싶습니다", "을", "를", "이", "가", "은", "는", "및", "과", "와",
+  "제외", "빼고", "말고", "제외한", "제외하는", "not",
 ]);
 
 function normalizeTerm(term: string) {
@@ -23,7 +25,7 @@ function extractQuotedTerms(question: string) {
 
 function extractCandidate(question: string) {
   const withoutQuotes = question.replace(/["“][^"”]+["”]/g, " ");
-  const marker = withoutQuotes.match(/(.+?)(?:을|를)?\s*(?:포함한|포함하는|동시에|함께)\s*(?:검색식|검색어)/i);
+  const marker = withoutQuotes.match(/(.+?)(?:을|를)?\s*(?:포함한|포함하는|포함하고|동시에|함께)\s*(?:검색식|검색어)/i);
   if (marker?.[1]) return marker[1];
   const beforeSearch = withoutQuotes.split(/(?:검색식|검색어)/i)[0];
   return beforeSearch.replace(/(?:만들|작성|생성|구성|짜).*$/i, "");
@@ -41,12 +43,16 @@ function extractTerms(candidate: string) {
 export function detectSearchExpressionIntent(question: string): SearchExpressionIntent | null {
   if (!requestPattern.test(question)) return null;
   const exact = extractQuotedTerms(question);
-  const terms = extractTerms(extractCandidate(question));
+  const excludeMatch = question.match(/([가-힣A-Za-z0-9]+(?:\s*(?:과|와|및|또는)\s*[가-힣A-Za-z0-9]+)?)\s*(?:은|는|을|를)?\s*(?:제외|빼고|말고|not)(?:하는|한)?/i);
+  const excludeClause = excludeMatch?.[1]?.trim() || "";
+  const includeClause = excludeMatch ? question.replace(excludeMatch[0], " ") : question;
+  const terms = extractTerms(extractCandidate(includeClause));
+  const exclude = extractTerms(excludeClause.replace(/^(?:을|를)?\s*/i, ""));
   if (!terms.length && !exact.length) return null;
 
   const any = /(?:또는|or|중\s*하나)/i.test(question) ? terms : [];
   const all = any.length ? [] : terms;
-  const input: SearchQueryInput = { any, all, exact };
+  const input: SearchQueryInput = { any, all, exact, exclude };
   const query = buildSearchQuery(input);
   if (!query) return null;
 
@@ -86,9 +92,17 @@ export function isUnderspecifiedQuestion(question: string) {
 }
 
 export function isLikelyGeneralKnowledgeQuestion(question: string) {
-  const serviceTerms = /빅카인즈|검색|기사|뉴스|데이터|api|faq|qna|이용|저작권|다운로드|분석|회원|오류|문의|정책|요금|검색식|연산자|형태소|바이그램|언론사|본문|수집|시각화/i;
+  const serviceTerms = /빅카인즈|검색|기사|뉴스|데이터|api|faq|qna|이용|저작권|다운로드|분석|회원|오류|문의|정책|요금|검색식|연산자|형태소|바이그램|언론사|본문|수집|시각화|고신문|아카이브|옛신문|과거신문|스크랩|관계도|관계망|연관어|수록|수록기사|검색결과|개체명|분석결과/i;
   const generalTerms = /대한민국|한국|대통령|총리|날씨|환율|주가|누구|무엇|몇\s*(?:명|개|년|월|일)|언제|어디|왜/i;
   return generalTerms.test(question) && !serviceTerms.test(question);
+}
+
+export function isChatbotMetaQuestion(question: string) {
+  return /너\s*(?:누구|뭐)|무슨\s*챗봇|어떤\s*질문을?\s*(?:할|물어)|누가\s*만들|무엇을\s*물어볼|무슨\s*도움/i.test(question);
+}
+
+export function isOpenApiQuestion(question: string) {
+  return /open\s*api|openapi|\bapi\b|api\s*key|apikey|인증키|api\s*(?:호출|문의)|호출\s*오류/i.test(question);
 }
 
 export function isArticleContentQuestion(question: string) {

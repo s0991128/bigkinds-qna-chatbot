@@ -25,13 +25,9 @@ window.BIGKINDS_KNOWLEDGE_BASE = {
       ],
       keywords: ["api", "open api", "openapi", "요금", "가격", "비용", "무료", "유료"],
       answer:
-        "빅카인즈 API 요금은 기준일과 사용량, 계약 조건에 따라 달라질 수 있습니다. 공개된 기준이 있으면 그 범위 안에서 안내하고, 세부 금액이나 계약 조건이 필요한 경우 담당자 확인이 필요합니다. 2026-01-01 기준으로 안내된 범위가 있고, 2026-12-31까지는 기존 조건이 유지될 수 있다는 식으로 설명할 수 있습니다. 예시 안내에서는 50% 할인 여부와 200만 건 초과 이용 같은 조건도 함께 확인합니다.",
+        "빅카인즈 API 요금과 계약 조건은 변경될 수 있으므로 이 챗봇에서 금액을 추정하지 않습니다. 최신 구매·이용 조건은 뉴스토어의 현재 상품 안내에서 확인해 주세요.",
       facts: [
-        "기준일 예시: 2026-01-01",
-        "유지 가능 기간 예시: 2026-12-31",
-        "예시 요금표: 11,270원",
-        "예시 할인율: 50%",
-        "200만 건 초과 사용은 별도 협의 필요",
+        "요금과 계약 조건은 변경될 수 있음",
         "사용량과 계약 조건에 따라 달라질 수 있음"
       ],
       steps: [
@@ -45,6 +41,7 @@ window.BIGKINDS_KNOWLEDGE_BASE = {
         pages: "1-2"
       },
       requiresReview: false,
+      alwaysEscalate: true,
       escalationTags: ["계약", "요금", "비용", "결제"]
     },
     {
@@ -95,6 +92,7 @@ window.BIGKINDS_KNOWLEDGE_BASE = {
         pages: "5"
       },
       requiresReview: false,
+      alwaysEscalate: true,
       escalationTags: ["500", "장애", "반복", "응답 실패"]
     },
     {
@@ -179,7 +177,8 @@ window.BIGKINDS_KNOWLEDGE_BASE = {
         label: "빅카인즈 OpenAPI 이용자 가이드",
         pages: "6-12"
       },
-      requiresReview: false
+      requiresReview: false,
+      alwaysEscalate: true
     },
     {
       id: "api-services",
@@ -201,7 +200,8 @@ window.BIGKINDS_KNOWLEDGE_BASE = {
         label: "빅카인즈 OpenAPI 이용자 가이드",
         pages: "3-4, 37-38"
       },
-      requiresReview: false
+      requiresReview: false,
+      alwaysEscalate: true
     },
     {
       id: "api-ai-use-restriction",

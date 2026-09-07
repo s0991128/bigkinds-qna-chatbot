@@ -106,7 +106,7 @@ function normalizeDate(value) {
   return text;
 }
 
-function normalizeHeader(value) { return clean(value).toLowerCase().replace(/[\s_().·\/-]/g, ""); }
+function normalizeHeader(value) { return clean(value).toLowerCase().replace(/[\s_().·/-]/g, ""); }
 function findColumn(headers, aliases) {
   return headers.map(normalizeHeader).findIndex((header) => aliases.some((alias) => {
     const normalized = normalizeHeader(alias);

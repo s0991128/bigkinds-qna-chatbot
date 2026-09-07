@@ -18,6 +18,18 @@ export type SearchableDocument = FaqItem & {
 
 export type SearchResult = { item: SearchableDocument; score: number };
 
+export type SearchOptions = {
+  answerableOnly?: boolean;
+};
+
+/** 최종 답변에 사용할 수 있는 현행 공식 문서인지 판정합니다. */
+export function isAnswerableDocument(document: SearchableDocument) {
+  return document.status === "CURRENT"
+    && document.requiresReview !== true
+    && document.alwaysEscalate !== true
+    && ["CURRENT_POLICY", "OFFICIAL_FAQ", "OFFICIAL_INTRO", "VERIFIED_QNA"].includes(document.authority ?? "");
+}
+
 const synonymGroups = [
   ["다운", "다운로드", "내려받기", "받기", "엑셀"],
   ["전문", "전체본문", "기사본문", "본문전체"],
@@ -58,9 +70,10 @@ function expandedTerms(query: string) {
   return [...terms];
 }
 
-export function searchFaq(query: string, limit = 3, documents: SearchableDocument[] = faqItems) {
+export function searchFaq(query: string, limit = 3, documents: SearchableDocument[] = faqItems, options: SearchOptions = {}) {
   const normalizedQuery = normalize(query);
   if (!normalizedQuery) return [];
+  const answerableOnly = options.answerableOnly ?? true;
 
   const lexicalTerms = normalizedQuery
     .split(" ")
@@ -71,6 +84,7 @@ export function searchFaq(query: string, limit = 3, documents: SearchableDocumen
   const terms = [...new Set([...expandedTerms(query), ...lexicalTerms])];
 
   return documents
+    .filter((item) => !answerableOnly || isAnswerableDocument(item))
     .map((item) => {
       const questionText = [item.question, item.title, ...(item.questions ?? [])].filter(Boolean).join(" ");
       const question = normalize(questionText);
@@ -103,7 +117,6 @@ export function searchFaq(query: string, limit = 3, documents: SearchableDocumen
         HISTORICAL_QNA: 0,
       };
       if (score > 0) score += authorityWeight[item.authority ?? "HISTORICAL_QNA"];
-      if (item.status === "REVIEW_REQUIRED") score -= 1;
       if (item.status === "SUPERSEDED") score -= 100;
 
       return { item, score, directMatch };

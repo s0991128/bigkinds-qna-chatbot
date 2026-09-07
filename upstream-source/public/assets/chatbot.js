@@ -185,7 +185,7 @@
 
       if (!response.ok) return null;
       return await response.json();
-    } catch (_error) {
+    } catch {
       return null;
     } finally {
       clearTimeout(timer);
@@ -215,6 +215,7 @@
     const payload = `질문 유형: ${category}\n질문: ${question}\n작성 시각: ${new Date().toLocaleString(
       "ko-KR"
     )}`;
+    void payload;
     const purchase = item.purchaseRequestUrl
       ? `<a class="bk-action" href="${esc(item.purchaseRequestUrl)}" target="_blank" rel="noopener">${esc(
           item.purchaseRequestLabel || "구매 요청"
