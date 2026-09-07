@@ -133,6 +133,14 @@ export function isApiCommercialQuestion(question: string) {
   return /open\s*api|openapi|\bapi\b/i.test(question) && /요금|가격|비용|구매|계약|신청|유료|결제|돈\s*(?:내|내야)/i.test(question);
 }
 
+export function isApiContactQuestion(question: string) {
+  const hasApi = /open\s*api|openapi|\bapi\b/i.test(question);
+  const asksContact = /문의|어디로/i.test(question);
+  const asksForHandoff = /신청|연락|담당|연락처|신청서/i.test(question);
+  const needsEscalation = /요금|가격|비용|구매|계약|유료|결제|돈\s*(?:내|내야)|오류|에러|실패|인증키|파라미터|호출/i.test(question);
+  return hasApi && asksContact && !asksForHandoff && !needsEscalation;
+}
+
 export function isApiTechnicalQuestion(question: string) {
   return /open\s*api|openapi|\bapi\b/i.test(question) && /호출|파라미터|응답|제공|개발|python|연동|인증키/i.test(question);
 }

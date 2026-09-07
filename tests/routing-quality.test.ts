@@ -11,4 +11,5 @@ test("routing protects the critical regression questions", async () => {
   assert.equal(classifyQuestion("기사 본문 다운로드 방법 알려줘", documents), "ANSWER");
   assert.equal(classifyQuestion("손흥민 이번주 골 넣었어?", documents), "NO_MATCH");
   assert.equal(classifyQuestion("OPEN API 요금이 어떻게 되나요?", documents), "ESCALATE");
+  assert.equal(classifyQuestion("OPEN API 관련 문의는 어디로 해야 하나요?", documents), "ANSWER");
 });

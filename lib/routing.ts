@@ -1,4 +1,4 @@
-import { getDirectFaqId, isApiCommercialQuestion, isApiErrorQuestion, isArticleContentQuestion, isArticleDownloadMethodQuestion, isBroadServiceQuestion, isChatbotMetaQuestion, isDateQuestion, isDownloadProblemQuestion, isEscalationQuestion, isLikelyGeneralKnowledgeQuestion, isSearchUsageQuestion, isUnderspecifiedQuestion } from "./question-intents";
+import { getDirectFaqId, isApiCommercialQuestion, isApiContactQuestion, isApiErrorQuestion, isArticleContentQuestion, isArticleDownloadMethodQuestion, isBroadServiceQuestion, isChatbotMetaQuestion, isDateQuestion, isDownloadProblemQuestion, isEscalationQuestion, isLikelyGeneralKnowledgeQuestion, isSearchUsageQuestion, isUnderspecifiedQuestion } from "./question-intents";
 import { decideSearch, type SearchAction } from "./search-decision";
 import { searchFaq, type SearchableDocument } from "./search";
 
@@ -6,6 +6,7 @@ export function classifyQuestion(question: string, documents: SearchableDocument
   if (isChatbotMetaQuestion(question) || isDateQuestion(question)) return "ANSWER";
   if (isArticleDownloadMethodQuestion(question)) return "ANSWER";
   if (getDirectFaqId(question)) return "ANSWER";
+  if (isApiContactQuestion(question)) return "ANSWER";
   if (isLikelyGeneralKnowledgeQuestion(question) || isArticleContentQuestion(question)) return "NO_MATCH";
   if (isApiCommercialQuestion(question) || isEscalationQuestion(question)) return "ESCALATE";
   if (isApiErrorQuestion(question)) return "ESCALATE";

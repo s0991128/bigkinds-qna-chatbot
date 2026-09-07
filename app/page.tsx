@@ -9,7 +9,7 @@ import { classifyPagePath, createPageContext, pageTypeLabels, PageContext } from
 import { buildSearchQuery, describeSearchQuery, SearchQueryInput } from "../lib/search-query-builder";
 import { detectDiagnosticKind, DiagnosticFlow, getDiagnosticFlow } from "../lib/diagnostic-flows";
 import { recordFeedback } from "../lib/feedback";
-import { detectSearchExpressionIntent, getDirectFaqId, isApiCommercialQuestion, isApiErrorQuestion, isArticleContentQuestion, isArticleDownloadMethodQuestion, isBroadServiceQuestion, isChatbotMetaQuestion, isDateQuestion, isEscalationQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isQnaRankingQuestion, isSearchUsageQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
+import { detectSearchExpressionIntent, getDirectFaqId, isApiCommercialQuestion, isApiContactQuestion, isApiErrorQuestion, isArticleContentQuestion, isArticleDownloadMethodQuestion, isBroadServiceQuestion, isChatbotMetaQuestion, isDateQuestion, isEscalationQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isQnaRankingQuestion, isSearchUsageQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
 import { generateRecommendedQuestions } from "../lib/recommendations";
 import { applyKnowledgeAuthority } from "../lib/knowledge-authority";
 import { assessPrivacy } from "../lib/privacy";
@@ -480,6 +480,18 @@ export default function Home() {
         return;
       }
 
+      if (isApiContactQuestion(cleanQuestion)) {
+        setMessages((current) => [...current, {
+          id: nextId.current++,
+          role: "assistant",
+          text: `OPEN API 관련 문의와 신청은 뉴스토어에서 확인해 주세요. 최신 상품·계약 조건은 공식 페이지에서 확인할 수 있습니다.`,
+          apiRedirect: true,
+          question: cleanQuestion,
+        }]);
+        setIsTyping(false);
+        return;
+      }
+
       if (generalKnowledgeQuestion) {
         setMessages((current) => [
           ...current,
@@ -698,7 +710,7 @@ export default function Home() {
                 <div><strong>0건</strong><span>기사 본문 저장</span></div>
               </div>
               <div className="knowledge-breakdown" aria-label="검색 문서 유형">
-                {knowledgeGroups.map((group) => (
+                {knowledgeGroups.filter((group) => group.count > 0).map((group) => (
                   <button
                     className={`knowledge-card knowledge-card-${group.key} ${selectedKnowledgeType === group.key ? "selected" : ""}`}
                     key={group.key}
