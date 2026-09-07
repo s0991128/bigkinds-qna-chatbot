@@ -21,6 +21,7 @@
 # misc
 .DS_Store
 *.pem
+*.tsbuildinfo
 
 # debug
 npm-debug.log*
@@ -39,6 +40,12 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+
+# copied upstream build outputs are not release source
+/upstream-source/public/_next/
+/upstream-source/public/assets/
+/upstream-source/public/favicon.svg
+/upstream-source/public/og.png
 
 # axhub import: local agent runtime state
 .axhub/

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { FAQ_SOURCE_URL, faqItems } from "../lib/faq";
+import { FAQ_SOURCE_URL } from "../lib/faq";
 import { searchFaq, SearchableDocument } from "../lib/search";
 import { CHAT_HISTORY_KEY, formatAnswer, OPEN_API_PURCHASE_URL } from "../lib/answer-format";
 import { buildAnswerViewModel, AnswerViewModel } from "../lib/answer-model";
@@ -9,8 +9,11 @@ import { classifyPagePath, createPageContext, pageTypeLabels, PageContext } from
 import { buildSearchQuery, describeSearchQuery, SearchQueryInput } from "../lib/search-query-builder";
 import { detectDiagnosticKind, DiagnosticFlow, getDiagnosticFlow } from "../lib/diagnostic-flows";
 import { recordFeedback } from "../lib/feedback";
-import { detectSearchExpressionIntent, isArticleContentQuestion, isDateQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isQnaRankingQuestion, isSearchUsageQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
+import { detectSearchExpressionIntent, isApiCommercialQuestion, isApiErrorQuestion, isArticleContentQuestion, isBroadServiceQuestion, isChatbotMetaQuestion, isDateQuestion, isEscalationQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isQnaRankingQuestion, isSearchUsageQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
 import { generateRecommendedQuestions } from "../lib/recommendations";
+import { applyKnowledgeAuthority } from "../lib/knowledge-authority";
+import { assessPrivacy } from "../lib/privacy";
+import { decideSearch } from "../lib/search-decision";
 
 declare global {
   interface Window {
@@ -39,10 +42,7 @@ const welcomeMessage: Message = {
   text: "안녕하세요. 빅카인즈 공식 Q&A·FAQ·소개·정책 문서를 바탕으로 뉴스 검색·분석 이용 방법을 안내해 드릴게요. 기사 원문 검색·요약은 지원하지 않으니 궁금한 이용 방법을 편하게 물어보세요.",
 };
 
-const LLM_USAGE_KEY = "bigkinds-llm-usage-v1";
-const LLM_DAILY_LIMIT = 20;
-const GUEST_USAGE_KEY = "bigkinds-guest-usage-v1";
-const GUEST_DAILY_LIMIT = 5;
+const LLM_CLIENT_ENABLED = String(process.env.NEXT_PUBLIC_LLM_ENABLED || "").toLowerCase() === "true";
 
 const categoryPrompts = [
   { label: "검색 사용법", question: "검색어는 어떤 방식으로 조합하나요?" },
@@ -52,7 +52,6 @@ const categoryPrompts = [
 const dataScriptPaths = [
   "/data/config.js",
   "/data/official-faq.js",
-  "/data/verified-policy.js",
   "/data/qna-import.js",
   ...Array.from({ length: 21 }, (_, index) => `/data/qna-data-${String(index + 1).padStart(2, "0")}.js`),
   "/data/knowledge-base.js",
@@ -72,6 +71,7 @@ function loadScript(path: string) {
 }
 
 function saveHistory(question: string, answer: string, item: SearchableDocument) {
+  if (!assessPrivacy(question).shouldSave) return;
   try {
     const current = JSON.parse(window.localStorage.getItem(CHAT_HISTORY_KEY) || "[]");
     const next = [{ id: `${Date.now()}-${item.id}`, question, answer, category: item.category,
@@ -82,84 +82,13 @@ function saveHistory(question: string, answer: string, item: SearchableDocument)
 }
 
 function normalizeKnowledgeDocument(document: SearchableDocument): SearchableDocument {
-  const authority = document.authority ?? (document.id.startsWith("official-faq-") ? "OFFICIAL_FAQ" : document.id.startsWith("bigkinds-intro-") ? "OFFICIAL_INTRO" : document.id.startsWith("qna-") ? "VERIFIED_QNA" : "CURRENT_POLICY");
-  const status = document.status ?? (document.id.startsWith("qna-") ? "REVIEW_REQUIRED" : "CURRENT");
-  return {
+  return applyKnowledgeAuthority({
     ...document,
     question: document.question || document.title || document.questions?.[0] || "공식 안내",
     category: document.category || "기타",
     keywords: document.keywords || [],
     answer: document.answer || "공식 답변을 확인해 주세요.",
-    authority,
-    status,
-  };
-}
-
-function isOpenApiQuestion(question: string) {
-  return /open\s*api|openapi|\bapi\b|인증키|호출 오류|api 문의/i.test(question);
-}
-
-function routingNormalize(value: string) {
-  return value
-    .toLowerCase()
-    .normalize("NFKC")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function isKeywordSufficientMatch(question: string, result: { item: SearchableDocument; score: number }) {
-  const normalizedQuestion = routingNormalize(question);
-  const itemText = routingNormalize([
-    result.item.question,
-    result.item.title,
-    ...(result.item.questions ?? []),
-    ...result.item.keywords,
-  ].filter(Boolean).join(" "));
-  if (!normalizedQuestion || !itemText) return false;
-  if (itemText.includes(normalizedQuestion) || result.score >= 48) return true;
-  const genericTerms = new Set(["전체", "내용", "질문", "관련", "방법", "알려", "어떻게", "무엇", "어떤", "있나요", "해주세요"]);
-  const terms = normalizedQuestion.split(" ")
-    .map((term) => term.replace(/[은는이가을를의에로으로]$/g, ""))
-    .filter((term) => term.length >= 2 && !genericTerms.has(term));
-  const matchedTerms = terms.filter((term) => itemText.includes(term));
-  return matchedTerms.length >= 2 && result.score >= 24;
-}
-
-function consumeLlmQuota() {
-  try {
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
-    const current = JSON.parse(window.localStorage.getItem(LLM_USAGE_KEY) || "null") as { date?: string; count?: number } | null;
-    const count = current?.date === today ? Number(current.count || 0) : 0;
-    if (count >= LLM_DAILY_LIMIT) return false;
-    window.localStorage.setItem(LLM_USAGE_KEY, JSON.stringify({ date: today, count: count + 1 }));
-    return true;
-  } catch {
-    return true;
-  }
-}
-
-function getGuestUsage() {
-  try {
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
-    const current = JSON.parse(window.localStorage.getItem(GUEST_USAGE_KEY) || "null") as { date?: string; count?: number } | null;
-    return current?.date === today ? Math.min(Number(current.count || 0), GUEST_DAILY_LIMIT) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function consumeGuestQuota() {
-  try {
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
-    const current = JSON.parse(window.localStorage.getItem(GUEST_USAGE_KEY) || "null") as { date?: string; count?: number } | null;
-    const count = current?.date === today ? Number(current.count || 0) : 0;
-    if (count >= GUEST_DAILY_LIMIT) return false;
-    window.localStorage.setItem(GUEST_USAGE_KEY, JSON.stringify({ date: today, count: count + 1 }));
-    return true;
-  } catch {
-    return true;
-  }
+  });
 }
 
 type KnowledgeType = "qna" | "faq" | "intro" | "policy";
@@ -189,33 +118,26 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([welcomeMessage]);
   const [query, setQuery] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [embedded, setEmbedded] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
+  const [embedded] = useState(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("embed") === "1");
+  const [chatOpen, setChatOpen] = useState(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("embed") === "1");
   const [selectedKnowledgeType, setSelectedKnowledgeType] = useState<KnowledgeType | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  const [knowledge, setKnowledge] = useState<SearchableDocument[]>(faqItems);
+  const [knowledge, setKnowledge] = useState<SearchableDocument[]>([]);
   const [dataReady, setDataReady] = useState(false);
   const [feedback, setFeedback] = useState<Record<number, "up" | "down">>({});
   const [feedbackReasons, setFeedbackReasons] = useState<Record<number, string>>({});
   const [expandedMessages, setExpandedMessages] = useState<Record<number, boolean>>({});
-  const [pageContext, setPageContext] = useState<PageContext>(() => createPageContext("/"));
+  const [pageContext, setPageContext] = useState<PageContext>(() => createPageContext(typeof window !== "undefined" ? window.location.pathname : "/"));
   const [showQueryBuilder, setShowQueryBuilder] = useState(false);
   const [showRecommendations, setShowRecommendations] = useState(true);
-  const [recommendedQuestions, setRecommendedQuestions] = useState<string[]>(() => generateRecommendedQuestions("HOME", faqItems));
-  const [guestUsed, setGuestUsed] = useState(0);
+  const [recommendedQuestions, setRecommendedQuestions] = useState<string[]>(() => generateRecommendedQuestions("HOME", []));
   const [queryBuilder, setQueryBuilder] = useState<SearchQueryInput>({ any: [], all: [], exact: [], exclude: [] });
   const [queryBuilderText, setQueryBuilderText] = useState<Record<string, string>>({ any: "", all: "", exact: "", exclude: "" });
   const nextId = useRef(2);
   const endRef = useRef<HTMLDivElement>(null);
+  const knowledgeRef = useRef<SearchableDocument[]>([]);
 
   useEffect(() => {
-    const isEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
-    setEmbedded(isEmbed);
-    setChatOpen(isEmbed);
-    setShowRecommendations(true);
-    setPageContext(createPageContext(window.location.pathname));
-    setGuestUsed(getGuestUsage());
-
     const onContext = (event: MessageEvent) => {
       if (event.source !== window.parent || !event.data || event.data.type !== "bigkinds-chatbot-context") return;
       const incoming = event.data.context as Partial<PageContext>;
@@ -225,7 +147,8 @@ export default function Home() {
         pageType: incoming.pageType || classifyPagePath(incoming.pathname),
         loggedIn: incoming.loggedIn ?? null,
       });
-      setRecommendedQuestions((current) => generateRecommendedQuestions(incoming.pageType || classifyPagePath(incoming.pathname), knowledge, current));
+      const incomingPageType = incoming.pageType || classifyPagePath(incoming.pathname);
+      setRecommendedQuestions((current) => generateRecommendedQuestions(incomingPageType, knowledgeRef.current, current));
       setShowRecommendations(true);
     };
     window.addEventListener("message", onContext);
@@ -236,7 +159,9 @@ export default function Home() {
         for (const path of dataScriptPaths) await loadScript(path);
         const documents = window.BIGKINDS_KNOWLEDGE_BASE?.documents ?? [];
         if (!cancelled && documents.length) {
-          setKnowledge(documents.map(normalizeKnowledgeDocument));
+          const normalized = documents.map(normalizeKnowledgeDocument);
+          knowledgeRef.current = normalized;
+          setKnowledge(normalized);
           setDataReady(true);
         }
       } catch {
@@ -384,18 +309,6 @@ export default function Home() {
     const cleanQuestion = question.trim();
     if (!cleanQuestion || isTyping) return;
 
-    if (!consumeGuestQuota()) {
-      setMessages((current) => [...current, {
-        id: nextId.current++,
-        role: "assistant",
-        text: "로그인 없이 이용할 수 있는 오늘의 체험 5회를 모두 사용했습니다. 내일 다시 이용하거나, 빅카인즈 공식 사이트에 로그인해 계속 이용해 주세요.",
-        isFallback: true,
-      }]);
-      setGuestUsed(GUEST_DAILY_LIMIT);
-      return;
-    }
-    setGuestUsed((current) => Math.min(current + 1, GUEST_DAILY_LIMIT));
-
     const userMessage: Message = {
       id: nextId.current++,
       role: "user",
@@ -408,10 +321,10 @@ export default function Home() {
     setShowRecommendations(false);
 
     const diagnosticKind = detectDiagnosticKind(cleanQuestion, pageContext.pageType);
-    const dateQuestion = isDateQuestion(cleanQuestion);
+    const privacy = assessPrivacy(cleanQuestion);
+    const dateQuestion = isDateQuestion(cleanQuestion) && !isSearchUsageQuestion(cleanQuestion);
     const searchExpressionIntent = detectSearchExpressionIntent(cleanQuestion);
-    const sensitive = /주민등록번호|비밀번호|인증키|api\s*key|apikey/i.test(cleanQuestion);
-    const generalKnowledgeQuestion = !sensitive && isLikelyGeneralKnowledgeQuestion(cleanQuestion);
+    const generalKnowledgeQuestion = !privacy.hasSensitiveValue && isLikelyGeneralKnowledgeQuestion(cleanQuestion);
 
     window.setTimeout(async () => {
       if (dateQuestion) {
@@ -424,6 +337,17 @@ export default function Home() {
             question: cleanQuestion,
           },
         ]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (isChatbotMetaQuestion(cleanQuestion)) {
+        setMessages((current) => [...current, {
+          id: nextId.current++,
+          role: "assistant",
+          text: "저는 빅카인즈 공식 FAQ·Q&A·소개 자료를 찾아 이용 방법을 안내하는 챗봇입니다. 검색·분석, 뉴스데이터, OPEN API, 회원·접속 문제를 도와드리며, 확인되지 않은 내용은 추측하지 않습니다.",
+          question: cleanQuestion,
+        }]);
         setIsTyping(false);
         return;
       }
@@ -534,7 +458,32 @@ export default function Home() {
         return;
       }
 
-      const apiInquiry = isOpenApiQuestion(cleanQuestion) && !sensitive;
+      if (!isApiErrorQuestion(cleanQuestion) && isEscalationQuestion(cleanQuestion)) {
+        setMessages((current) => [...current, {
+          id: nextId.current++,
+          role: "assistant",
+          text: "이용 범위·계약·권한 또는 최신 정책 확인이 필요한 질문입니다. 저장된 과거 Q&A로 조건을 확정하지 않고, 공식 원문과 담당자 확인을 권합니다.",
+          isFallback: true,
+          question: cleanQuestion,
+        }]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (isBroadServiceQuestion(cleanQuestion)) {
+        setMessages((current) => [...current, {
+          id: nextId.current++,
+          role: "assistant",
+          text: "어떤 기능이나 상황을 확인하려는지 조금 더 알려주세요. 예를 들어 ‘검색식을 만드는 방법’, ‘다운로드한 파일이 열리지 않음’, ‘API 신청 방법’처럼 질문해 주시면 관련 공식 문서를 찾아드릴게요.",
+          isFallback: true,
+          question: cleanQuestion,
+        }]);
+        setIsTyping(false);
+        return;
+      }
+
+      const apiCommercial = isApiCommercialQuestion(cleanQuestion) && !privacy.hasSensitiveValue;
+      const apiError = isApiErrorQuestion(cleanQuestion);
       const searchHelp = /검색식|검색어|연산자/i.test(cleanQuestion) && /어떻게|방법|사용|쓰|조합/i.test(cleanQuestion);
       const searchHelpDocument = searchHelp ? knowledge.find((item) => item.id === "official-faq-17") : undefined;
       const searchUsageDocument = isSearchUsageQuestion(cleanQuestion)
@@ -544,15 +493,35 @@ export default function Home() {
         ? [{ item: searchHelpDocument, score: 999 }]
         : searchUsageDocument
           ? [{ item: searchUsageDocument, score: 999 }]
-          : searchFaq(cleanQuestion, 3, knowledge);
-      const privacyDocument = knowledge.find((item) => item.id === "privacy-security");
-      const safeResults = sensitive && privacyDocument
-        ? [{ item: privacyDocument, score: 999 }]
+          : searchFaq(cleanQuestion, 8, knowledge);
+      const privacyDocument = knowledge.find((item) => item.id === "official-faq-30");
+      const safeResults = privacy.hasSensitiveValue && privacyDocument
+        ? [{ item: privacyDocument, score: 999, exactMatch: true }]
         : results;
-      const best = safeResults[0];
+      const decision = privacy.hasSensitiveValue
+        ? { action: "ESCALATE" as const, confidence: "HIGH" as const, candidates: safeResults, eligible: safeResults[0], reason: "민감한 값은 자동 처리하지 않습니다." }
+        : decideSearch(cleanQuestion, safeResults);
+      const best = decision.eligible;
       const assistantId = nextId.current++;
 
-      if (apiInquiry) {
+      if (privacy.hasSensitiveValue) {
+        setMessages((current) => [...current, {
+          id: assistantId,
+          role: "assistant",
+          text: "개인정보·비밀번호·인증키 같은 실제 값을 입력하지 마세요. 입력한 값은 자동 답변과 대화 기록에 사용하지 않으며, 이미 입력했다면 해당 메시지를 삭제하고 공식 담당자에게 직접 확인해 주세요.",
+          isFallback: true,
+          question: cleanQuestion,
+          relatedIds: privacyDocument ? [privacyDocument.id] : [],
+        }]);
+      } else if (apiError && diagnosticKind) {
+        setMessages((current) => [...current, {
+          id: assistantId,
+          role: "assistant",
+          text: getDiagnosticFlow(diagnosticKind).title,
+          diagnostic: getDiagnosticFlow(diagnosticKind),
+          question: cleanQuestion,
+        }]);
+      } else if (apiCommercial) {
         setMessages((current) => [
           ...current,
           {
@@ -563,27 +532,44 @@ export default function Home() {
             question: cleanQuestion,
           },
         ]);
-      } else if (diagnosticKind && cleanQuestion.length < 40) {
+      } else if (diagnosticKind && cleanQuestion.length < 80) {
         setMessages((current) => [
           ...current,
           { id: assistantId, role: "assistant", text: getDiagnosticFlow(diagnosticKind).title, diagnostic: getDiagnosticFlow(diagnosticKind), question: cleanQuestion },
         ]);
-      } else if (!best) {
+      } else if (decision.action === "ESCALATE") {
         setMessages((current) => [
           ...current,
           {
             id: assistantId,
             role: "assistant",
-            text: "저장된 공식 문서에서 질문과 직접 관련된 내용을 찾지 못했어요. 이 챗봇은 빅카인즈 FAQ·정책·소개·Q&A 범위에서만 안내합니다. 질문을 조금 더 구체적으로 바꾸거나 관련 주제를 선택해 주세요.",
+            text: "관련 문서는 찾았지만 현재 정책·계약·권한 또는 과거 Q&A의 확인이 필요한 내용입니다. 최신 조건을 임의로 확정하지 않고, 공식 원문과 담당자 확인을 권합니다.",
             isFallback: true,
             question: cleanQuestion,
+            relatedIds: decision.candidates.slice(0, 3).map((result) => result.item.id),
           },
         ]);
+      } else if (decision.action === "CLARIFY") {
+        setMessages((current) => [...current, {
+          id: assistantId,
+          role: "assistant",
+          text: "질문의 범위를 조금 더 좁혀 주시면 정확하게 안내할 수 있어요. 아래 관련 문서 중 어떤 내용이 필요한지 선택해 주세요.",
+          isFallback: true,
+          question: cleanQuestion,
+          relatedIds: decision.candidates.slice(0, 3).map((result) => result.item.id),
+        }]);
+      } else if (decision.action === "NO_MATCH" || !best) {
+        setMessages((current) => [...current, {
+          id: assistantId,
+          role: "assistant",
+          text: "저장된 공식 문서에서 질문과 직접 관련된 내용을 찾지 못했어요. 이 챗봇은 빅카인즈 FAQ·정책·소개·Q&A 범위에서만 안내합니다.",
+          isFallback: true,
+          question: cleanQuestion,
+        }]);
       } else {
         const answerModel = buildAnswerViewModel(best.item);
-        const keywordAnswer = isKeywordSufficientMatch(cleanQuestion, best);
-        const supplementAnswer = !sensitive && !keywordAnswer && consumeLlmQuota()
-          ? await requestLlmAnswer(cleanQuestion, safeResults, messages)
+        const supplementAnswer = LLM_CLIENT_ENABLED && decision.confidence === "HIGH" && privacy.shouldSendToLlm
+          ? await requestLlmAnswer(cleanQuestion, messages)
           : null;
         setMessages((current) => [
           ...current,
@@ -592,7 +578,7 @@ export default function Home() {
             role: "assistant",
             text: supplementAnswer || answerModel.summary,
             matchedId: best.item.id,
-            relatedIds: safeResults.slice(1).map((result) => result.item.id),
+            relatedIds: decision.candidates.slice(1, 4).map((result) => result.item.id),
             answerModel,
             question: cleanQuestion,
             usedSupplement: Boolean(supplementAnswer),
@@ -605,21 +591,14 @@ export default function Home() {
     }, 420);
   }
 
-  async function requestLlmAnswer(question: string, results: Array<{ item: SearchableDocument; score: number }>, history: Message[]) {
+  async function requestLlmAnswer(question: string, history: Message[]) {
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           question,
-          sources: results.slice(0, 3).map(({ item, score }) => ({
-            id: item.id,
-            title: item.title || item.question,
-            answer: item.answer,
-            effectiveDate: item.effectiveDate,
-            score,
-          })),
-          history: history.slice(-6).map((message) => ({ role: message.role, text: message.text })).filter((turn) => !/주민등록번호|비밀번호|인증키|api\s*key|apikey/i.test(turn.text)),
+          history: history.slice(-6).map((message) => ({ role: message.role, text: message.text })).filter((turn) => assessPrivacy(turn.text).shouldSendToLlm),
         }),
       });
       if (!response.ok) return null;
@@ -754,7 +733,7 @@ export default function Home() {
                 <span aria-hidden="true">✓</span>
                 <p><strong>공식 자료를 우선합니다.</strong> 근거가 없으면 추측하지 않습니다.<br />빅카인즈 Q&amp;A는 저장된 공식 문서를 기준으로 안내합니다.</p>
               </div>
-              <p className="guest-landing-note">로그인 없이 하루 최대 5회까지 체험해보세요.</p>
+              <p className="guest-landing-note">로그인 없이 공식 안내를 먼저 확인해보세요.</p>
             </div>
 
             <aside className="flow-card" aria-label="답변 생성 흐름">
@@ -915,12 +894,14 @@ export default function Home() {
                   {(related.length > 0 || message.isFallback) && (
                     <div className="related-list">
                       <span>{message.isFallback ? "이런 주제는 답할 수 있어요" : "함께 볼 질문"}</span>
-                      {(message.isFallback ? knowledge.slice(6, 9) : related).map((item) => item && (
+                      {(message.isFallback
+                        ? (message.relatedIds?.length ? related : knowledge.filter((item) => item.status === "CURRENT").slice(0, 3))
+                        : related).map((item) => item && (
                         <button key={item.id} type="button" onClick={() => ask(item.question)}>
                           {item.question}
                         </button>
                       ))}
-                      {message.isFallback && <div className="escalation-actions"><span>해결되지 않으면 문의 내용을 정리해 공식 Q&amp;A로 연결할 수 있습니다.</span><button type="button" onClick={() => copyText(`문의 유형: ${pageContext.pageType}\n질문: ${message.question || message.text}`)}>내용 복사</button><button type="button" onClick={() => emitHostAction({ type: "OPEN_QNA", label: "Q&A 열기", url: QNA_SOURCE_URL })}>Q&amp;A 열기</button></div>}
+                      {message.isFallback && <div className="escalation-actions"><span>해결되지 않으면 공식 Q&amp;A에서 담당자에게 문의할 수 있습니다.</span><button type="button" onClick={() => emitHostAction({ type: "OPEN_QNA", label: "Q&amp;A 열기", url: QNA_SOURCE_URL })}>Q&amp;A 열기</button></div>}
                     </div>
                   )}
                 </div>
@@ -951,7 +932,6 @@ export default function Home() {
             <button type="submit" disabled={!query.trim() || isTyping} aria-label="질문 보내기">↑</button>
           </div>
           <p className="disclaimer">빅카인즈 Q&amp;A는 저장된 공식 Q&amp;A·FAQ·소개·정책 문서를 기준으로 안내합니다.<br />정확한 정보와 최신 내용은 출처로 함께 제공되는 공식 원문을 확인해 주세요.</p>
-          <p className="guest-note">로그인 없이 하루 최대 5회까지 체험할 수 있습니다. 오늘 남은 체험: {Math.max(0, GUEST_DAILY_LIMIT - guestUsed)}회</p>
         </form>
       </section>}
       {!embedded && !chatOpen && (

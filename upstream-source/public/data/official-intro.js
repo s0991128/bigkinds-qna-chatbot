@@ -150,7 +150,7 @@
         url: "https://www.bigkinds.or.kr/v2/intro/index.do",
         pages: "서비스 특징·가치 있는 정보"
       },
-      requiresReview: true
+      requiresReview: false
     }
   ];
 
@@ -167,6 +167,4 @@
   kb.disclaimer =
     "빅카인즈 공식 FAQ·Q&A·정책 및 공식 소개 페이지를 바탕으로 만든 지식베이스입니다. 서비스 범위·수치·정책은 변경될 수 있으므로 중요한 판단은 공식 원문을 확인해 주세요.";
 })();
-
-
 

@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "upstream-source/public/_next/**",
+    "upstream-source/public/assets/**",
   ]),
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

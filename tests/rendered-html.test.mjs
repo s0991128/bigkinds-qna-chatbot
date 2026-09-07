@@ -24,7 +24,7 @@ test("server-renders the BIGKinds chatbot shell", async () => {
   assert.match(html, /<strong>23<\/strong><span>공식 FAQ/);
   assert.match(html, /필요한 답부터 찾으세요/);
   assert.match(html, /저장된 공식 문서를 기준으로 안내합니다/);
-  assert.match(html, /로그인 없이 하루 최대 5회/);
+  assert.match(html, /로그인 없이 공식 안내/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
@@ -53,13 +53,16 @@ test("upstream source snapshot and widget assets are present", async () => {
 });
 
 test("Service Copilot modules and policy safeguards are present", async () => {
-  const [context, builder, diagnostic, answer, feedback, intents] = await Promise.all([
+  const [context, builder, diagnostic, answer, feedback, intents, authority, privacy, decision] = await Promise.all([
     readFile(new URL("../lib/page-context.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/search-query-builder.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/diagnostic-flows.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/answer-model.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/feedback.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/question-intents.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/knowledge-authority.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/privacy.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/search-decision.ts", import.meta.url), "utf8"),
   ]);
   assert.match(context, /NEWS_SEARCH/);
   assert.match(context, /OPEN_API/);
@@ -76,4 +79,7 @@ test("Service Copilot modules and policy safeguards are present", async () => {
   assert.match(intents, /isArticleContentQuestion/);
   assert.match(intents, /isQnaRankingQuestion/);
   assert.match(intents, /isSearchUsageQuestion/);
+  assert.match(authority, /HISTORICAL_QNA/);
+  assert.match(privacy, /shouldSendToLlm/);
+  assert.match(decision, /CLARIFY/);
 });

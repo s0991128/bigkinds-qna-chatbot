@@ -12,11 +12,12 @@ export type SearchableDocument = FaqItem & {
   steps?: string[];
   authority?: "CURRENT_POLICY" | "OFFICIAL_FAQ" | "OFFICIAL_INTRO" | "VERIFIED_QNA" | "HISTORICAL_QNA";
   status?: "CURRENT" | "REVIEW_REQUIRED" | "SUPERSEDED";
+  reviewClass?: "STATIC_ONLY" | "HUMAN_REVIEWED";
   reviewedAt?: string;
   supersededBy?: string;
 };
 
-export type SearchResult = { item: SearchableDocument; score: number };
+export type SearchResult = { item: SearchableDocument; score: number; matchedTerms?: string[]; exactMatch?: boolean };
 
 const synonymGroups = [
   ["다운", "다운로드", "내려받기", "받기", "엑셀"],
@@ -58,7 +59,7 @@ function expandedTerms(query: string) {
   return [...terms];
 }
 
-export function searchFaq(query: string, limit = 3, documents: SearchableDocument[] = faqItems) {
+export function searchFaq(query: string, limit = 8, documents: SearchableDocument[] = faqItems) {
   const normalizedQuery = normalize(query);
   if (!normalizedQuery) return [];
 
@@ -106,9 +107,9 @@ export function searchFaq(query: string, limit = 3, documents: SearchableDocumen
       if (item.status === "REVIEW_REQUIRED") score -= 1;
       if (item.status === "SUPERSEDED") score -= 100;
 
-      return { item, score, directMatch };
+      return { item, score, directMatch, matchedTerms: meaningfulTerms.filter((term) => question.includes(term) || keywords.includes(term)), exactMatch: question.includes(normalizedQuery) };
     })
-    .filter((result) => result.score >= 4 && result.directMatch && result.item.status !== "SUPERSEDED")
+    .filter((result) => result.score > 0 && result.item.status !== "SUPERSEDED")
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 }

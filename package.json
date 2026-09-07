@@ -11,8 +11,13 @@
     "start": "vinext start",
     "validate:upstream": "node upstream-source/scripts/validate-data.mjs",
     "security:scan": "node scripts/security-scan.mjs",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test": "npm run build && node --test tests/rendered-html.test.mjs && npm run test:quality && npm run validate:knowledge",
+    "test:quality": "tsx --test tests/*.test.ts",
+    "eval": "tsx scripts/evaluate.ts",
+    "holdout": "tsx scripts/evaluate-holdout.ts",
+    "validate:knowledge": "node scripts/validate-knowledge.mjs",
+    "lint": "eslint app lib scripts tests",
+    "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
@@ -39,6 +44,7 @@
     "globals": "16.4.0",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
+    "tsx": "^4.22.1",
     "typescript": "5.9.3",
     "typescript-eslint": "8.59.3",
     "vinext": "1.0.0-beta.2",

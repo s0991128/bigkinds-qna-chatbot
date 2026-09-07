@@ -150,7 +150,7 @@
         url: "https://www.bigkinds.or.kr/v2/intro/index.do",
         pages: "서비스 특징·가치 있는 정보"
       },
-      requiresReview: true
+      requiresReview: false
     }
   ];
 

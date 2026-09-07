@@ -152,6 +152,9 @@ for (const [rowIndex, row] of rows.slice(1).entries()) {
     answer,
     effectiveDate: date || "2026-08-25",
     source: { label: "빅카인즈 운영지원 Q&A 공식 답변", pages: date ? `답변일 ${date}` : "답변일 미기재" },
+    authority: "HISTORICAL_QNA",
+    status: "REVIEW_REQUIRED",
+    reviewClass: "STATIC_ONLY",
     requiresReview: true
   });
 }

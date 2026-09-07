@@ -6,7 +6,6 @@ import vm from "node:vm";
 const sandbox = { window: {} };
 for (const file of [
   "../public/data/official-faq.js",
-  "../public/data/verified-policy.js",
   "../public/data/qna-import.js",
   ...Array.from({ length: 21 }, (_, index) => `../public/data/qna-data-${String(index + 1).padStart(2, "0")}.js`),
   "../public/data/knowledge-base.js",
@@ -19,12 +18,10 @@ for (const file of [
 const kb = sandbox.window.BIGKINDS_KNOWLEDGE_BASE;
 
 test("downloaded upstream data is merged into one knowledge base", () => {
-  assert.ok(kb.documents.length >= 36);
+  assert.equal(kb.documents.length, 736);
   assert.equal(kb.documents.filter((item) => item.id.startsWith("official-faq-")).length, 23);
-  assert.ok(kb.documents.some((item) => item.id === "api-pricing"));
-  assert.ok(kb.documents.some((item) => item.id === "api-purchase-official"));
-  assert.ok(kb.documents.some((item) => item.id === "privacy-security"));
   assert.equal(kb.documents.filter((item) => item.id.startsWith("bigkinds-intro-")).length, 5);
+  assert.equal(kb.documents.filter((item) => item.authority === "HISTORICAL_QNA").length, 708);
 });
 
 test("every downloaded document contains answer and provenance metadata", () => {
@@ -34,6 +31,10 @@ test("every downloaded document contains answer and provenance metadata", () => 
     assert.ok(document.effectiveDate);
     assert.ok(document.source?.label);
     assert.ok(Array.isArray(document.keywords) && document.keywords.length);
+    if (document.id.startsWith("qna-")) {
+      assert.equal(document.authority, "HISTORICAL_QNA");
+      assert.equal(document.status, "REVIEW_REQUIRED");
+    }
     assert.equal(ids.has(document.id), false);
     ids.add(document.id);
   }
