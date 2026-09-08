@@ -12,18 +12,16 @@ const contextualPools: Partial<Record<PageType, string[]>> = {
   ],
   NEWS_SEARCH: [
     "검색결과가 안 나와요",
-    "윤석열과 대통령을 포함한 검색식을 만들어줘",
+    "인공지능과 반도체를 모두 포함한 검색식을 만들어줘",
     "형태소와 바이그램은 뭐가 다른가요?",
     "정확한 문구를 검색하려면 어떻게 하나요?",
     "검색결과를 다운로드하고 싶어요",
     "검색 기간과 언론사 조건은 어떻게 설정하나요?",
   ],
   OPEN_API: [
-    "OPEN API 이용 신청은 어디에서 하나요?",
-    "OPEN API로 제공되는 데이터 범위가 궁금해요",
-    "API 호출 오류가 발생했어요",
-    "API 본문 제공 범위가 어떻게 되나요?",
-    "뉴스토어와 OPEN API의 차이는 무엇인가요?",
+    "OPEN API 문의는 뉴스토어에서 확인하고 싶어요",
+    "OPEN API 신청·구매 안내를 뉴스토어에서 확인하고 싶어요",
+    "OPEN API 이용 조건은 어디에서 확인하나요?",
   ],
   FAQ: [
     "검색어는 어떤 방식으로 조합하나요?",
@@ -51,6 +49,7 @@ const contextualPools: Partial<Record<PageType, string[]>> = {
 
 const fallbackPool = [
   "검색식과 연산자는 어떻게 쓰나요?",
+  "기후변화 또는 탄소중립이 포함된 검색식을 만들어줘",
   "형태소와 바이그램은 뭐가 다른가요?",
   "기사 본문 전체를 받을 수 있나요?",
   "저작권과 출처 표기 기준이 궁금해요",
@@ -78,7 +77,7 @@ function shuffle<T>(values: T[]) {
 export function generateRecommendedQuestions(pageType: PageType, documents: SearchableDocument[], previous: string[] = []) {
   const pageCandidates = contextualPools[pageType] ?? fallbackPool;
   const documentCandidates = documents
-    .filter((document) => document.authority === "OFFICIAL_FAQ" || document.authority === "CURRENT_POLICY")
+    .filter((document) => document.authority === "OFFICIAL_FAQ" || document.authority === "CURRENT_POLICY" || document.authority === "CURRENT_OFFICIAL_GUIDE" || document.authority === "CURRENT_OFFICIAL_INTRO" || document.authority === "CURRENT_CANONICAL")
     .map(documentQuestion)
     .filter(Boolean);
   const pool = [...new Set([...pageCandidates, ...documentCandidates, ...fallbackPool])]

@@ -5,8 +5,26 @@ export type SearchQueryInput = {
   exclude?: string[];
 };
 
-function cleanTerms(values: string[] = []) {
-  return values.map((value) => value.trim()).filter(Boolean);
+const invalidSearchTerms = new Set([
+  "기사", "기사만", "뉴스", "뉴스만", "보도", "검색결과", "검색결", "결과", "어떤", "서로", "내용", "주제",
+  "너무", "많이", "많아", "나오는데", "오는데", "어떻게", "줄여", "줄이고", "좁혀", "넓혀", "언급되는지",
+]);
+const searchCommandPattern = /(?:포함해(?:줘|주세요)?|넣어(?:줘|주세요)?|추가해(?:줘|주세요)?|빼줘|제외해(?:줘|주세요)?|없애줘|되는지|보고\s*싶|찾고\s*싶|싶어요|싶습니다|인가요|할까|나오는데|오는데)/i;
+
+function cleanTerms(values: string[] = [], protectExact = false) {
+  return values
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value) => protectExact || (!invalidSearchTerms.has(value.toLowerCase()) && !searchCommandPattern.test(value)));
+}
+
+export function validateSearchInput(input: SearchQueryInput): SearchQueryInput {
+  return {
+    any: cleanTerms(input.any),
+    all: cleanTerms(input.all),
+    exact: cleanTerms(input.exact, true),
+    exclude: cleanTerms(input.exclude),
+  };
 }
 
 function exactTerm(value: string) {
@@ -26,10 +44,11 @@ function objectParticle(value: string) {
 }
 
 export function buildSearchQuery(input: SearchQueryInput) {
-  const any = cleanTerms(input.any).map((term) => term.includes(" ") ? exactTerm(term) : term);
-  const all = cleanTerms(input.all).map((term) => term.includes(" ") ? exactTerm(term) : term);
-  const exact = cleanTerms(input.exact).map(exactTerm).filter(Boolean);
-  const exclude = cleanTerms(input.exclude).map((term) => term.includes(" ") ? exactTerm(term) : term);
+  const validated = validateSearchInput(input);
+  const any = cleanTerms(validated.any).map((term) => term.includes(" ") ? exactTerm(term) : term);
+  const all = cleanTerms(validated.all).map((term) => term.includes(" ") ? exactTerm(term) : term);
+  const exact = cleanTerms(validated.exact, true).map(exactTerm).filter(Boolean);
+  const exclude = cleanTerms(validated.exclude).map((term) => term.includes(" ") ? exactTerm(term) : term);
   const parts: string[] = [];
   if (any.length) parts.push(any.length > 1 ? `(${any.join(" OR ")})` : any[0]);
   parts.push(...all);
@@ -39,10 +58,11 @@ export function buildSearchQuery(input: SearchQueryInput) {
 }
 
 export function describeSearchQuery(input: SearchQueryInput) {
-  const any = cleanTerms(input.any);
-  const all = cleanTerms(input.all);
-  const exact = cleanTerms(input.exact);
-  const exclude = cleanTerms(input.exclude);
+  const validated = validateSearchInput(input);
+  const any = cleanTerms(validated.any);
+  const all = cleanTerms(validated.all);
+  const exact = cleanTerms(validated.exact, true);
+  const exclude = cleanTerms(validated.exclude);
   const sentences: string[] = [];
   if (any.length) sentences.push(`${any.join(" 또는 ")} 중 하나 이상을 포함하고`);
   if (all.length) {

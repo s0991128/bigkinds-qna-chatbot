@@ -24,7 +24,8 @@ test("server-renders the BIGKinds chatbot shell", async () => {
   assert.match(html, /<strong>23<\/strong><span>공식 FAQ/);
   assert.match(html, /필요한 답부터 찾으세요/);
   assert.match(html, /저장된 공식 문서를 기준으로 안내합니다/);
-  assert.match(html, /로그인 없이 하루 최대 5회/);
+  assert.match(html, /누구나 무료로 이용할 수 있습니다/);
+  assert.doesNotMatch(html, /로그인 없이 하루 최대 5회/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 

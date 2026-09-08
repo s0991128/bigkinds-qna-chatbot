@@ -15,6 +15,7 @@ export function detectDiagnosticKind(question: string, pageType: PageType): Diag
 export function getDiagnosticFlow(kind: DiagnosticKind): DiagnosticFlow {
   if (kind === "SEARCH_NO_RESULT") return { kind, title: "어떤 문제가 발생했나요?", options: [
     { label: "검색결과가 0건이에요", question: "검색결과가 0건일 때 어떻게 해결하나요?" },
+    { label: "결과가 너무 많아요", question: "검색결과가 너무 많을 때 어떻게 줄이나요?" },
     { label: "원하는 기사만 나오지 않아요", question: "원하는 기사만 검색되지 않아요" },
     { label: "검색식을 모르겠어요", question: "검색식과 연산자는 어떻게 쓰나요?" },
     { label: "검색 버튼이 작동하지 않아요", question: "검색 버튼이 작동하지 않아요" },
