@@ -1,17 +1,27 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { FAQ_SOURCE_URL, faqItems } from "../lib/faq";
 import { isAnswerableDocument, searchFaq, SearchableDocument } from "../lib/search";
 import { evaluateSearchConfidence } from "../lib/search-confidence";
-import { CHAT_HISTORY_KEY, formatAnswer, OPEN_API_PURCHASE_URL } from "../lib/answer-format";
+import { formatAnswer, OPEN_API_PURCHASE_URL } from "../lib/answer-format";
 import { buildAnswerViewModel, AnswerViewModel } from "../lib/answer-model";
 import { classifyPagePath, createPageContext, pageTypeLabels, PageContext } from "../lib/page-context";
-import { buildSearchQuery, describeSearchQuery, SearchQueryInput } from "../lib/search-query-builder";
+import { buildSearchQuery, describeSearchQuery, validateSearchInput, SearchQueryInput } from "../lib/search-query-builder";
+import { normalizeSearchInput } from "../lib/search-term-normalizer";
 import { detectDiagnosticKind, DiagnosticFlow, getDiagnosticFlow } from "../lib/diagnostic-flows";
 import { recordFeedback } from "../lib/feedback";
-import { detectSearchExpressionIntent, isArticleContentQuestion, isChatbotMetaQuestion, isDateQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isOpenApiQuestion, isQnaRankingQuestion, isSearchUsageQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
+import { classifySearchTurn, detectSearchExpressionIntent, extractSimpleSearchGoal, isArticleContentQuestion, isChatbotMetaQuestion, isDateQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isOpenApiQuestion, isQnaRankingQuestion, isSearchGoalQuestion, isSearchUsageQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
 import { generateRecommendedQuestions } from "../lib/recommendations";
+import { capabilitySourcesExist, getCapabilitiesById, recommendCapabilities, Capability } from "../lib/capabilities";
+import { recordInsight } from "../lib/insights";
+import { routeUserIntent } from "../lib/intent-router";
+import type { UserIntent } from "../lib/intent-router";
+import { diagnoseSearchExpression, parseSearchExpression, SearchDiagnosis } from "../lib/search-diagnostics";
+import { archiveChatSession, ChatSession, createChatSession, loadActiveChatSession, PersistedChatMessage, PersistedMessageAction, saveActiveChatSession, shouldStartNewSession } from "../lib/chat-session";
+import type { AiInterpretation, AiIntent, AiRouterResponse, AiSearchInput, AiSuggestedTerms, AiTask } from "../lib/ai/types";
+import { applySearchTurn, createSearchContext, emptySearchContext, getSearchContextStatus } from "../lib/search-context";
+import type { SearchContext, SearchTurnResult } from "../lib/search-context";
 
 declare global {
   interface Window {
@@ -20,7 +30,7 @@ declare global {
 }
 
 type Message = {
-  id: number;
+  id: number | string;
   role: "assistant" | "user";
   text: string;
   matchedId?: string;
@@ -30,8 +40,29 @@ type Message = {
   diagnostic?: DiagnosticFlow;
   question?: string;
   apiRedirect?: boolean;
-  searchQuery?: { value: string; description: string };
+  searchQuery?: { value: string; description: string; input?: AiSearchInput };
   usedSupplement?: boolean;
+  capabilities?: Capability[];
+  fallbackKind?: "SEARCH_GOAL";
+  actions?: PersistedMessageAction[];
+  intent?: string;
+  capabilityId?: string;
+  searchDiagnosis?: SearchDiagnosis;
+  suggestedTerms?: AiSuggestedTerms[];
+};
+
+type StartMode = "NEWS_FIND" | "SEARCH_BUILD" | "SEARCH_DIAGNOSIS" | "FEATURE_RECOMMENDATION" | "TROUBLESHOOT" | "USAGE_GUIDE" | null;
+type PurposeMode = Exclude<StartMode, null> | "OPEN_API";
+type SearchWorkingState = {
+  lastIntent: AiIntent | UserIntent | null;
+  lastSearchInput: AiSearchInput | null;
+  lastGeneratedQuery: string | null;
+  lastCapabilityId: string | null;
+  activeMode: StartMode;
+  lastSearchMode: SearchTurnResult["mode"] | null;
+  searchRevision: number;
+  searchStartedAt: string | null;
+  searchContext: SearchContext;
 };
 
 const welcomeMessage: Message = {
@@ -40,12 +71,20 @@ const welcomeMessage: Message = {
   text: "안녕하세요. 빅카인즈 공식 Q&A·FAQ·소개·정책 문서를 바탕으로 뉴스 검색·분석 이용 방법을 안내해 드릴게요. 기사 원문 검색·요약은 지원하지 않으니 궁금한 이용 방법을 편하게 물어보세요.",
 };
 
-const GUEST_USAGE_KEY = "bigkinds-guest-usage-v1";
-const GUEST_DAILY_LIMIT = 5;
+const purposeMenu: Array<{ label: string; description: string; mode: PurposeMode }> = [
+  { label: "뉴스 찾기", description: "원하는 주제의 기사 찾기", mode: "NEWS_FIND" },
+  { label: "검색식 만들기", description: "AND·OR·NOT 없이 조건 만들기", mode: "SEARCH_BUILD" },
+  { label: "검색식 진단", description: "검색식 의도와 괄호 확인", mode: "SEARCH_DIAGNOSIS" },
+  { label: "기능 추천", description: "목적에 맞는 기능 찾기", mode: "FEATURE_RECOMMENDATION" },
+  { label: "문제 해결", description: "검색·다운로드 문제 해결", mode: "TROUBLESHOOT" },
+  { label: "이용 안내", description: "수록·다운로드·분석 안내", mode: "USAGE_GUIDE" },
+  { label: "OPEN API", description: "뉴스토어 신청·계약 안내", mode: "OPEN_API" },
+];
 
-const categoryPrompts = [
-  { label: "검색 사용법", question: "검색어는 어떤 방식으로 조합하나요?" },
-  { label: "OPEN API", question: "OPEN API 관련 문의는 어디로 해야 하나요?" },
+const searchGoalFallbackQuestions = [
+  "검색식 만들어보기",
+  "검색조건을 더 자세히 입력하기",
+  "검색식 사용법 보기",
 ];
 
 const dataScriptPaths = [
@@ -70,18 +109,8 @@ function loadScript(path: string) {
   });
 }
 
-function saveHistory(question: string, answer: string, item: SearchableDocument) {
-  try {
-    const current = JSON.parse(window.localStorage.getItem(CHAT_HISTORY_KEY) || "[]");
-    const next = [{ id: `${Date.now()}-${item.id}`, question, answer, category: item.category,
-      sourceLabel: item.source?.label, sourceUrl: item.source?.url ?? FAQ_SOURCE_URL,
-      createdAt: new Date().toISOString() }, ...current].slice(0, 100);
-    window.localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(next));
-  } catch { /* 저장이 차단된 환경에서도 답변은 계속 제공합니다. */ }
-}
-
 function normalizeKnowledgeDocument(document: SearchableDocument): SearchableDocument {
-  const authority = document.authority ?? (document.id.startsWith("official-faq-") ? "OFFICIAL_FAQ" : document.id.startsWith("bigkinds-intro-") ? "OFFICIAL_INTRO" : document.id.startsWith("qna-") ? "VERIFIED_QNA" : "CURRENT_POLICY");
+  const authority = document.authority ?? (document.id.startsWith("official-faq-") ? "OFFICIAL_FAQ" : document.id.startsWith("bigkinds-intro-") ? "CURRENT_OFFICIAL_INTRO" : document.id.startsWith("qna-") ? "VERIFIED_QNA" : "CURRENT_POLICY");
   const status = document.status === "SUPERSEDED"
     ? "SUPERSEDED"
     : document.requiresReview === true || document.alwaysEscalate === true
@@ -96,29 +125,6 @@ function normalizeKnowledgeDocument(document: SearchableDocument): SearchableDoc
     authority,
     status,
   };
-}
-
-function getGuestUsage() {
-  try {
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
-    const current = JSON.parse(window.localStorage.getItem(GUEST_USAGE_KEY) || "null") as { date?: string; count?: number } | null;
-    return current?.date === today ? Math.min(Number(current.count || 0), GUEST_DAILY_LIMIT) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function consumeGuestQuota() {
-  try {
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
-    const current = JSON.parse(window.localStorage.getItem(GUEST_USAGE_KEY) || "null") as { date?: string; count?: number } | null;
-    const count = current?.date === today ? Number(current.count || 0) : 0;
-    if (count >= GUEST_DAILY_LIMIT) return false;
-    window.localStorage.setItem(GUEST_USAGE_KEY, JSON.stringify({ date: today, count: count + 1 }));
-    return true;
-  } catch {
-    return true;
-  }
 }
 
 type KnowledgeType = "qna" | "faq" | "intro" | "policy";
@@ -144,6 +150,52 @@ const knowledgeTypeMeta: Record<KnowledgeType, { label: string; description: str
   policy: { label: "정책·사용법", description: "API·저작권·이용 기준" },
 };
 
+function toPersistedMessage(message: Message): PersistedChatMessage {
+  return {
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    matchedId: message.matchedId,
+    relatedIds: message.relatedIds,
+    isFallback: message.isFallback,
+    question: message.question,
+    apiRedirect: message.apiRedirect,
+    searchQuery: message.searchQuery ? { value: message.searchQuery.value, description: message.searchQuery.description } : undefined,
+    searchInput: message.searchQuery?.input,
+    capabilityId: message.capabilityId || message.capabilities?.[0]?.id,
+    capabilityIds: message.capabilities?.map((capability) => capability.id),
+    intent: message.intent,
+    actions: message.actions,
+    answerModel: message.answerModel,
+    diagnostic: message.diagnostic,
+    searchDiagnosis: message.searchDiagnosis,
+    capabilities: message.capabilities,
+    suggestedTerms: message.suggestedTerms,
+  };
+}
+
+function fromPersistedMessage(message: PersistedChatMessage): Message {
+  return {
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    matchedId: message.matchedId,
+    relatedIds: message.relatedIds,
+    isFallback: message.isFallback,
+    question: message.question,
+    apiRedirect: message.apiRedirect,
+    searchQuery: message.searchQuery ? { ...message.searchQuery, input: message.searchInput } : undefined,
+    intent: message.intent,
+    capabilityId: message.capabilityId,
+    actions: message.actions,
+    answerModel: message.answerModel,
+    diagnostic: message.diagnostic,
+    searchDiagnosis: message.searchDiagnosis,
+    capabilities: message.capabilities,
+    suggestedTerms: message.suggestedTerms,
+  };
+}
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([welcomeMessage]);
   const [query, setQuery] = useState("");
@@ -160,21 +212,82 @@ export default function Home() {
   const [pageContext, setPageContext] = useState<PageContext>(() => createPageContext("/"));
   const [showQueryBuilder, setShowQueryBuilder] = useState(false);
   const [showRecommendations, setShowRecommendations] = useState(true);
+  const [showPurposeMenu, setShowPurposeMenu] = useState(true);
+  const [activeMode, setActiveMode] = useState<StartMode>(null);
   const [recommendedQuestions, setRecommendedQuestions] = useState<string[]>(() => generateRecommendedQuestions("HOME", faqItems));
-  const [guestUsed, setGuestUsed] = useState(0);
   const [queryBuilder, setQueryBuilder] = useState<SearchQueryInput>({ any: [], all: [], exact: [], exclude: [] });
   const [queryBuilderText, setQueryBuilderText] = useState<Record<string, string>>({ any: "", all: "", exact: "", exclude: "" });
   const nextId = useRef(2);
   const endRef = useRef<HTMLDivElement>(null);
+  const sessionRef = useRef<ChatSession>(createChatSession());
+  const sessionIdRef = useRef(sessionRef.current.id);
+  const messagesRef = useRef<Message[]>([welcomeMessage]);
+  const hydratedRef = useRef(false);
+  const workingStateRef = useRef<SearchWorkingState>({
+    lastIntent: null,
+    lastSearchInput: null,
+    lastGeneratedQuery: null,
+    lastCapabilityId: null,
+    activeMode: null,
+    lastSearchMode: null,
+    searchRevision: 0,
+    searchStartedAt: null,
+    searchContext: emptySearchContext(),
+  });
+  const aiStateRef = workingStateRef;
 
   useEffect(() => {
     const isEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEmbedded(isEmbed);
-    setChatOpen(isEmbed);
-    setShowRecommendations(true);
-    setPageContext(createPageContext(window.location.pathname));
-    setGuestUsed(getGuestUsage());
+    const restored = loadActiveChatSession();
+    if (restored && !shouldStartNewSession(restored)) {
+      sessionRef.current = restored;
+      sessionIdRef.current = restored.id;
+      const restoredMessages = restored.messages.length ? restored.messages.map(fromPersistedMessage) : [{ ...welcomeMessage, id: 1 }];
+      messagesRef.current = restoredMessages;
+      const state = restored.workingState;
+      const restoredContext = state.searchContext;
+      const restoredInput = restoredContext?.input || state.lastSearchInput || null;
+      const restoredQuery = restoredContext?.query || restoredContext?.generatedQuery || state.lastGeneratedQuery || null;
+      const restoredRevision = restoredContext?.revision ?? state.searchRevision ?? 0;
+      const restoredUpdatedAt = restoredContext?.updatedAt || state.searchStartedAt || null;
+      aiStateRef.current = {
+        lastIntent: (state.lastIntent as AiIntent | null) || null,
+        lastSearchInput: restoredInput,
+        lastGeneratedQuery: restoredQuery,
+        lastCapabilityId: state.lastCapabilityId || null,
+        activeMode: (state.activeMode as StartMode) || null,
+        lastSearchMode: state.lastSearchMode || null,
+        searchRevision: restoredRevision,
+        searchStartedAt: restoredUpdatedAt,
+        searchContext: {
+          status: getSearchContextStatus(restoredContext as SearchContext),
+          input: restoredInput,
+          query: restoredQuery,
+          source: restoredContext?.source || null,
+          revision: restoredRevision,
+          updatedAt: restoredUpdatedAt,
+        },
+      };
+      startTransition(() => {
+        setMessages(restoredMessages);
+        setActiveMode((state.activeMode as StartMode) || null);
+        setShowPurposeMenu(!restoredMessages.some((message) => message.role === "user"));
+      });
+      const numericIds = restoredMessages.map((message) => typeof message.id === "number" ? message.id : 0);
+      nextId.current = Math.max(1, ...numericIds) + 1;
+    } else {
+      if (restored) archiveChatSession(restored);
+      sessionRef.current = createChatSession();
+      sessionIdRef.current = sessionRef.current.id;
+      saveActiveChatSession(sessionRef.current);
+    }
+    hydratedRef.current = true;
+    startTransition(() => {
+      setEmbedded(isEmbed);
+      setChatOpen(isEmbed);
+      setShowRecommendations(true);
+      setPageContext(createPageContext(window.location.pathname));
+    });
 
     const onContext = (event: MessageEvent) => {
       if (event.source !== window.parent || !event.data || event.data.type !== "bigkinds-chatbot-context") return;
@@ -189,6 +302,10 @@ export default function Home() {
       setShowRecommendations(true);
     };
     window.addEventListener("message", onContext);
+    const onPageHide = () => {
+      persistCurrentSessionNow();
+    };
+    window.addEventListener("pagehide", onPageHide);
 
     let cancelled = false;
     (async () => {
@@ -207,6 +324,7 @@ export default function Home() {
     return () => {
       cancelled = true;
       window.removeEventListener("message", onContext);
+      window.removeEventListener("pagehide", onPageHide);
     };
   // knowledge is populated by the same one-time loader; including it would re-register the message listener.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -215,6 +333,41 @@ export default function Home() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages, isTyping]);
+
+  function persistCurrentSessionNow(currentMessages = messagesRef.current) {
+    if (!hydratedRef.current) return;
+    const firstUser = currentMessages.find((message) => message.role === "user");
+    sessionRef.current.id = sessionIdRef.current;
+    sessionRef.current.messages = currentMessages.map(toPersistedMessage);
+    sessionRef.current.title = firstUser?.text ? firstUser.text.slice(0, 80) : sessionRef.current.title;
+    sessionRef.current.updatedAt = new Date().toISOString();
+    delete sessionRef.current.closedAt;
+    sessionRef.current.workingState = {
+      lastIntent: aiStateRef.current.lastIntent,
+      lastSearchInput: aiStateRef.current.lastSearchInput,
+      lastGeneratedQuery: aiStateRef.current.lastGeneratedQuery,
+      lastCapabilityId: aiStateRef.current.lastCapabilityId,
+      activeMode: aiStateRef.current.activeMode,
+      lastSearchMode: aiStateRef.current.lastSearchMode,
+      searchRevision: aiStateRef.current.searchRevision,
+      searchStartedAt: aiStateRef.current.searchStartedAt,
+      searchContext: aiStateRef.current.searchContext,
+    };
+    saveActiveChatSession(sessionRef.current);
+    if (currentMessages.some((message) => message.role === "user")) archiveChatSession(sessionRef.current);
+  }
+
+  function updateWorkingState(partial: Partial<SearchWorkingState>) {
+    aiStateRef.current = { ...aiStateRef.current, ...partial };
+    persistCurrentSessionNow();
+  }
+
+  useEffect(() => {
+    messagesRef.current = messages;
+    persistCurrentSessionNow(messages);
+  // Persist only when the message list changes; refs hold the working state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]);
 
   const answeredCount = useMemo(
     () => messages.filter((message) => message.role === "assistant" && message.matchedId).length,
@@ -342,22 +495,343 @@ export default function Home() {
     if (message.question) ask(message.question);
   }
 
+  async function requestAi(question: string, task: AiTask = "ROUTE", stateOverride?: Partial<SearchWorkingState>) : Promise<AiRouterResponse> {
+    const state = stateOverride || (task === "INTERPRET_SEARCH_GOAL" || task === "CLASSIFY_SEARCH_TURN"
+      ? { activeMode: aiStateRef.current.activeMode }
+      : aiStateRef.current);
+    try {
+      const response = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          question,
+          task,
+          pageType: pageContext.pageType,
+          state: { ...state, pageType: pageContext.pageType },
+        }),
+      });
+      return await response.json() as AiRouterResponse;
+    } catch {
+      return { available: false, reason: "UPSTREAM" };
+    }
+  }
+
+  async function resolveSearchTurn(question: string): Promise<SearchTurnResult> {
+    const previous = aiStateRef.current.lastSearchInput;
+    const deterministic = classifySearchTurn(question, Boolean(previous));
+    if (deterministic.mode !== "CLARIFY") return deterministic;
+
+    const result = await requestAi(question, "CLASSIFY_SEARCH_TURN", {
+      activeMode: aiStateRef.current.activeMode,
+      lastSearchInput: previous,
+      lastSearchMode: aiStateRef.current.lastSearchMode,
+    });
+    const interpretation = result.interpretation;
+    if (!result.available || !interpretation?.searchMode) return deterministic;
+    if (interpretation.searchMode === "NEW") {
+      return interpretation.searchInput
+        ? { mode: "NEW", searchInput: normalizeSearchInput(interpretation.searchInput) }
+        : deterministic;
+    }
+    if (interpretation.searchMode === "UPDATE") {
+      const patch = interpretation.patch || (interpretation.searchInput ? { add: interpretation.searchInput } : undefined);
+      return patch ? { mode: "UPDATE", patch } : deterministic;
+    }
+    return {
+      mode: interpretation.searchMode,
+      needsClarification: interpretation.needsClarification,
+      clarifyingQuestion: interpretation.clarifyingQuestion,
+    };
+  }
+
+  function renderSearchCoachMessage(input: AiSearchInput, cleanQuestion: string, text: string | undefined = undefined, suggestedTerms: AiSuggestedTerms[] = [], mode: "NEW" | "UPDATE" = "NEW") {
+    const normalizedInput = validateSearchInput(normalizeSearchInput(input));
+    const value = buildSearchQuery(normalizedInput);
+    if (!value) return false;
+    const description = describeSearchQuery(normalizedInput);
+    const searchContext = createSearchContext(normalizedInput, mode === "UPDATE" ? "UPDATE" : "NEW", { previous: aiStateRef.current.searchContext });
+    updateWorkingState({
+      lastIntent: "SEARCH_COACH",
+      lastSearchInput: normalizedInput as AiSearchInput,
+      lastGeneratedQuery: value,
+      lastSearchMode: mode,
+      searchRevision: searchContext.revision,
+      searchStartedAt: mode === "NEW" ? searchContext.updatedAt : aiStateRef.current.searchStartedAt || searchContext.updatedAt,
+      searchContext,
+    });
+    const assistantId = nextId.current++;
+    setMessages((current) => [...current, {
+      id: assistantId,
+      role: "assistant",
+      text: text || (mode === "UPDATE" ? "기존 검색조건에 요청하신 조건을 반영했습니다." : "새로운 검색 주제로 이해했습니다. 찾고 싶은 뉴스 주제를 기준으로 검색조건을 정리했습니다."),
+      searchQuery: { value, description, input: normalizedInput as AiSearchInput },
+      question: cleanQuestion,
+      intent: mode === "UPDATE" ? "SEARCH_UPDATE" : "SEARCH_NEW",
+      suggestedTerms,
+      actions: [
+        { id: `copy-query-${assistantId}`, label: "검색식 복사", type: "COPY_QUERY", value },
+        { id: `edit-query-${assistantId}`, label: "조건 수정", type: "SET_MODE", value: "SEARCH_BUILD" },
+        { id: `new-search-${assistantId}`, label: "새 검색", type: "RESET_SEARCH" },
+      ],
+    }]);
+    recordInsight({ eventType: "SEARCH_COACH_USED", pageType: pageContext.pageType });
+    return true;
+  }
+
+  function showCapabilityRecommendation(matches: Capability[], cleanQuestion: string) {
+    if (!matches.length) return false;
+    const capability = matches[0];
+    const guideQuestions: Record<string, string> = {
+      NEWS_SEARCH: "뉴스 검색은 어떻게 이용하나요?",
+      SEARCH_EXPRESSION: "검색어는 어떤 방식으로 조합하나요?",
+      SEARCH_REFINEMENT: "검색결과가 너무 많을 때 어떻게 줄이나요?",
+      DOWNLOAD: "검색결과를 엑셀로 받을 수 있어?",
+      MORPHEME_ANALYSIS: "형태소 분석은 어디서 해?",
+      VISUALIZATION: "뉴스 분석과 시각화는 어떻게 이용하나요?",
+      NETWORK_ANALYSIS: "관계도 분석은 어떻게 써?",
+      RELATED_WORDS: "연관어 분석은 어떻게 이용하나요?",
+      OLD_NEWSPAPER: "고신문은 어떻게 이용하나요?",
+    };
+    updateWorkingState({ lastIntent: "FEATURE_RECOMMENDATION", lastCapabilityId: matches[0]?.id || null });
+    setMessages((current) => [...current, {
+      id: nextId.current++, role: "assistant", text: `추천 기능: ${matches[0].label}`,
+      capabilities: matches, capabilityId: matches[0]?.id, intent: "FEATURE_RECOMMENDATION", question: cleanQuestion,
+      actions: capability ? [{ id: `capability-${capability.id}`, label: `${capability.label} 사용법 보기`, type: "SHOW_GUIDE", value: guideQuestions[capability.id] || `${capability.label} 사용법을 알려줘` }] : [],
+    }]);
+    matches.forEach((capability) => recordInsight({ eventType: "FEATURE_RECOMMENDED", pageType: pageContext.pageType, capabilityId: capability.id }));
+    return true;
+  }
+
+  function recommendFeatureForQuestion(cleanQuestion: string, capabilityIds?: string[]) {
+    const matches = (capabilityIds?.length ? getCapabilitiesById(capabilityIds) : recommendCapabilities(cleanQuestion))
+      .filter((capability) => capabilitySourcesExist(capability, knowledge));
+    return showCapabilityRecommendation(matches, cleanQuestion);
+  }
+
+  async function answerWithAi(cleanQuestion: string, task: AiTask = "ROUTE") {
+    const result = await requestAi(cleanQuestion, task);
+    if (!result.available || !result.interpretation) {
+      if (result.reason !== "OPEN_API" && result.reason !== "SENSITIVE") {
+        recordInsight({ eventType: "GEMINI_UNAVAILABLE", pageType: pageContext.pageType });
+      }
+      return false;
+    }
+
+    const interpretation: AiInterpretation = result.interpretation;
+    if (interpretation.intent === "SEARCH_COACH") {
+      if (task === "UPDATE_SEARCH") {
+        const previous = aiStateRef.current.lastSearchInput;
+        const patch = interpretation.patch || (interpretation.searchInput ? { add: interpretation.searchInput } : undefined);
+        const input = previous && patch ? applySearchTurn(previous, { mode: "UPDATE", patch }) : null;
+        if (input && renderSearchCoachMessage(input, cleanQuestion, undefined, interpretation.suggestedTerms || [], "UPDATE")) return true;
+      } else if (interpretation.searchInput) {
+        const input = normalizeSearchInput(interpretation.searchInput);
+        if (renderSearchCoachMessage(input, cleanQuestion, undefined, interpretation.suggestedTerms || [], "NEW")) return true;
+      }
+    }
+
+    if (interpretation.intent === "FEATURE_RECOMMENDATION") {
+      return recommendFeatureForQuestion(cleanQuestion, interpretation.capabilityIds);
+    }
+
+    if (interpretation.intent === "SEARCH_DIAGNOSIS" || interpretation.intent === "TROUBLESHOOT") {
+      const kind = interpretation.diagnosticKind;
+      if (kind === "SEARCH_NO_RESULT" || kind === "DOWNLOAD_PROBLEM" || kind === "API_ERROR") {
+        const flow = getDiagnosticFlow(kind);
+        setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: flow.title, diagnostic: flow, question: cleanQuestion }]);
+        recordInsight({ eventType: interpretation.intent === "SEARCH_DIAGNOSIS" ? "SEARCH_DIAGNOSIS_USED" : "TROUBLESHOOT_USED", pageType: pageContext.pageType });
+        return true;
+      }
+    }
+
+    if (interpretation.needsClarification && interpretation.clarifyingQuestion) {
+      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: interpretation.clarifyingQuestion || "원하는 목적을 조금 더 알려주세요.", isFallback: true, question: cleanQuestion }]);
+      return true;
+    }
+
+    if (interpretation.intent === "OUT_OF_SCOPE") {
+      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "해당 질문은 빅카인즈 이용 방법과 관련된 질문이 아닙니다. 이 서비스는 빅카인즈 검색·분석·다운로드·수록 데이터 등 서비스 이용을 안내합니다.", isFallback: true, question: cleanQuestion, intent: "OUT_OF_SCOPE", actions: [
+        { id: "out-news", label: "뉴스 찾기", type: "SET_MODE", value: "NEWS_FIND" },
+        { id: "out-search", label: "검색식 만들기", type: "SET_MODE", value: "SEARCH_BUILD" },
+        { id: "out-feature", label: "기능 추천", type: "SET_MODE", value: "FEATURE_RECOMMENDATION" },
+      ] }]);
+      recordInsight({ eventType: "OUT_OF_SCOPE", pageType: pageContext.pageType });
+      return true;
+    }
+    return false;
+  }
+
+  async function answerSearchGoal(cleanQuestion: string) {
+    if (await answerWithAi(cleanQuestion, "INTERPRET_SEARCH_GOAL")) return true;
+    const simpleInput = extractSimpleSearchGoal(cleanQuestion);
+    if (!simpleInput) return false;
+    if (!simpleInput.all.length && !simpleInput.any.length && !simpleInput.exact.length && !simpleInput.exclude.length) return false;
+    return renderSearchCoachMessage(normalizeSearchInput(simpleInput), cleanQuestion, undefined, [], "NEW");
+  }
+
+  function startMode(mode: PurposeMode) {
+    setShowPurposeMenu(false);
+    setShowRecommendations(false);
+    if (mode === "OPEN_API") {
+      updateWorkingState({ activeMode: null, lastIntent: "OPEN_API_REDIRECT" as AiIntent });
+      setMessages((current) => [...current, {
+        id: nextId.current++, role: "assistant",
+        text: "OPEN API 관련 사항은 뉴스토어에서 확인해 주세요.",
+        apiRedirect: true,
+        intent: "OPEN_API_REDIRECT",
+        actions: [{ id: "open-api", label: "뉴스토어 OPEN API 확인", type: "OPEN_URL", url: OPEN_API_PURCHASE_URL }],
+      }]);
+      recordInsight({ eventType: "OPEN_API_REDIRECT", pageType: pageContext.pageType });
+      return;
+    }
+    const prompts: Record<Exclude<StartMode, null>, { text: string; actions?: PersistedMessageAction[] }> = {
+      NEWS_FIND: { text: "찾고 싶은 뉴스 주제를 평소 말하듯 입력해 주세요.\n예: 저출생 관련 뉴스를 찾아보고 싶어요." },
+      SEARCH_BUILD: { text: "AND·OR·NOT을 몰라도 괜찮아요. 포함하거나 제외할 주제를 문장으로 입력해 주세요.\n예: 인공지능과 반도체가 들어가고 주가는 빼줘." },
+      SEARCH_DIAGNOSIS: { text: "확인하고 싶은 검색식을 입력해 주세요.\n예: AI OR 인공지능 AND 반도체" },
+      FEATURE_RECOMMENDATION: { text: "빅카인즈에서 하고 싶은 일을 설명해 주세요.\n예: 기사에서 어떤 기업들이 같이 언급되는지 보고 싶어요." },
+      TROUBLESHOOT: { text: "검색·다운로드 중 어떤 문제가 있었는지 평소 말하듯 입력해 주세요." },
+      USAGE_GUIDE: {
+        text: "어떤 이용 안내가 필요하신가요?",
+        actions: [
+          { id: "guide-coverage", label: "뉴스 수록 범위", type: "SHOW_GUIDE", value: "빅카인즈에는 어떤 규모의 뉴스가 수록되어 있나요?" },
+          { id: "guide-search", label: "검색 사용법", type: "SHOW_GUIDE", value: "검색어는 어떤 방식으로 조합하나요?" },
+          { id: "guide-download", label: "다운로드", type: "SHOW_GUIDE", value: "검색 결과를 다운로드하고 싶어요" },
+          { id: "guide-analysis", label: "분석 기능", type: "SHOW_GUIDE", value: "뉴스 분석과 시각화는 어떻게 이용하나요?" },
+          { id: "guide-old", label: "고신문", type: "SHOW_GUIDE", value: "고신문은 어떻게 이용하나요?" },
+          { id: "guide-membership", label: "회원·이용 문제", type: "SHOW_GUIDE", value: "회원가입 인증메일이 오지 않아요" },
+        ],
+      },
+    };
+    const prompt = prompts[mode];
+    setActiveMode(mode);
+    updateWorkingState({ activeMode: mode, lastIntent: mode as AiIntent });
+    setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: prompt.text, intent: mode, actions: prompt.actions }]);
+  }
+
+  function handleMessageAction(action: PersistedMessageAction) {
+    if (action.type === "SET_MODE" && action.value) startMode(action.value as PurposeMode);
+    else if (action.type === "COPY_QUERY" && action.value) void copyText(action.value);
+    else if (action.type === "OPEN_URL" && action.url) emitHostAction({ type: "OPEN_URL", label: action.label, url: action.url });
+    else if (action.type === "SHOW_GUIDE" && action.value) ask(action.value);
+    else if (action.type === "OPEN_QNA") emitHostAction({ type: "OPEN_QNA", label: action.label, url: QNA_SOURCE_URL });
+    else if (action.type === "RESET_SEARCH") resetSearchContext();
+    else if (action.type === "APPLY_SEARCH_DIAGNOSIS" && action.value) {
+      const input = parseSearchExpression(action.value);
+      if (input.all?.length || input.any?.length || input.exact?.length || input.exclude?.length) {
+        renderSearchCoachMessage(input, "수정 검색식 사용", "수정한 검색식을 검색조건에 적용했습니다.", [], "NEW");
+      }
+    }
+    else if (action.type === "USE_ALL_SUGGESTIONS" && action.value) {
+      try {
+        const suggestion = JSON.parse(action.value) as { baseTerm: string; alternatives: string[] };
+        const current = aiStateRef.current.lastSearchInput;
+        if (current) {
+          const all = current.all.filter((term) => term !== suggestion.baseTerm);
+          const input = { ...current, all, any: [...new Set([...(current.any || []), suggestion.baseTerm, ...suggestion.alternatives])] };
+          renderSearchCoachMessage(input, "관련 표현도 함께 검색", "관련 표현을 포함하도록 검색조건을 넓혔습니다.", [], "UPDATE");
+        }
+      } catch { /* ignore malformed client action data */ }
+    }
+  }
+
+  function resetSearchContext() {
+    setActiveMode("NEWS_FIND");
+    updateWorkingState({
+      activeMode: "NEWS_FIND",
+      lastIntent: "SEARCH_COACH",
+      lastSearchInput: null,
+      lastGeneratedQuery: null,
+      lastSearchMode: null,
+      searchStartedAt: null,
+      searchContext: emptySearchContext(),
+    });
+    setMessages((current) => [...current, {
+      id: nextId.current++,
+      role: "assistant",
+      text: "새로 찾고 싶은 뉴스 주제를 입력해 주세요.",
+      intent: "SEARCH_NEW",
+    }]);
+  }
+
+  function showSearchDiagnosis(diagnosis: SearchDiagnosis, question: string) {
+    const input = parseSearchExpression(diagnosis.suggestion);
+    const proposed = createSearchContext(input, "DIAGNOSIS", { status: "PROPOSED", previous: aiStateRef.current.searchContext });
+    setMessages((current) => [...current, {
+      id: nextId.current++, role: "assistant",
+      text: diagnosis.message,
+      searchDiagnosis: diagnosis,
+      question,
+      intent: "SEARCH_DIAGNOSIS",
+      actions: [
+        { id: "copy-diagnosis-query", label: "수정 검색식 복사", type: "COPY_QUERY", value: diagnosis.suggestion },
+        { id: "apply-diagnosis-query", label: "수정 검색식 사용", type: "APPLY_SEARCH_DIAGNOSIS", value: diagnosis.suggestion },
+      ],
+    }]);
+    updateWorkingState({
+      lastIntent: "SEARCH_EXPRESSION_DIAGNOSIS",
+      lastSearchInput: proposed.input as AiSearchInput,
+      lastGeneratedQuery: proposed.query,
+      searchRevision: proposed.revision,
+      searchContext: proposed,
+    });
+    recordInsight({ eventType: "SEARCH_DIAGNOSIS_USED", pageType: pageContext.pageType });
+  }
+
+  function showSearchResultDiagnosis(question: string, previousSearch: AiSearchInput | null) {
+    const currentQuery = previousSearch ? buildSearchQuery(previousSearch) : "";
+    const text = currentQuery
+      ? `현재 검색조건을 더 좁힐 수 있습니다.\n현재 검색식: ${currentQuery}`
+      : "현재 검색식이나 찾으려는 주제를 알려주시면 결과를 좁히는 조건을 함께 정리해 드릴게요.";
+    setMessages((current) => [...current, {
+      id: nextId.current++, role: "assistant", text,
+      intent: "SEARCH_DIAGNOSIS", question,
+      actions: [
+        { id: "add-required", label: "반드시 포함할 단어 추가", type: "SET_MODE", value: "SEARCH_BUILD" },
+        { id: "add-exact", label: "정확한 문구 지정", type: "SET_MODE", value: "SEARCH_BUILD" },
+        { id: "add-exclude", label: "제외할 단어 추가", type: "SET_MODE", value: "SEARCH_BUILD" },
+        { id: "check-period", label: "검색기간 확인", type: "SHOW_GUIDE", value: "검색기간은 어떻게 설정하나요?" },
+      ],
+    }]);
+    updateWorkingState({ lastIntent: "SEARCH_DIAGNOSIS", lastSearchMode: "DIAGNOSIS" });
+    recordInsight({ eventType: "SEARCH_DIAGNOSIS_USED", pageType: pageContext.pageType });
+  }
+
+  function showOfficialDocument(document: SearchableDocument, question: string, intent: UserIntent) {
+    const answerModel = buildAnswerViewModel(document);
+    const actions: PersistedMessageAction[] = [];
+    if (intent === "SERVICE_OVERVIEW") {
+      actions.push(
+        { id: "overview-news", label: "뉴스 찾기", type: "SET_MODE", value: "NEWS_FIND" },
+        { id: "overview-search", label: "검색식 만들기", type: "SET_MODE", value: "SEARCH_BUILD" },
+        { id: "overview-feature", label: "기능 추천", type: "SET_MODE", value: "FEATURE_RECOMMENDATION" },
+        { id: "overview-guide", label: "이용 방법", type: "SET_MODE", value: "USAGE_GUIDE" },
+      );
+    } else if (document.source?.url) {
+      actions.push({ id: `source-${document.id}`, label: "공식 원문 보기", type: "OPEN_URL", url: document.source.url });
+    }
+    const summary = intent === "SERVICE_OVERVIEW"
+      ? `${answerModel.summary}\n\n주요 활용:\n${(document.facts || []).map((fact) => `- ${fact}`).join("\n")}\n\n어떤 작업을 하시려는지 알려주시면 맞는 기능을 찾아드릴게요.`
+      : answerModel.summary;
+    const eventType = intent === "SERVICE_OVERVIEW"
+      ? "SERVICE_OVERVIEW_USED"
+      : intent === "SERVICE_FACT" ? "SERVICE_FACT_USED" : "SERVICE_GUIDE_USED";
+    updateWorkingState({ lastIntent: intent });
+    recordInsight({ eventType, pageType: pageContext.pageType, documentId: document.id });
+    setMessages((current) => [...current, {
+      id: nextId.current++,
+      role: "assistant",
+      text: summary,
+      matchedId: document.id,
+      answerModel,
+      question,
+      intent,
+      actions,
+    }]);
+  }
+
   function ask(question: string) {
     const cleanQuestion = question.trim();
     if (!cleanQuestion || isTyping) return;
-
-    const isGuest = pageContext.loggedIn !== true;
-    if (isGuest && !consumeGuestQuota()) {
-      setMessages((current) => [...current, {
-        id: nextId.current++,
-        role: "assistant",
-        text: "로그인 없이 이용할 수 있는 오늘의 체험 5회를 모두 사용했습니다. 내일 다시 이용하거나, 빅카인즈 공식 사이트에 로그인해 계속 이용해 주세요.",
-        isFallback: true,
-      }]);
-      setGuestUsed(GUEST_DAILY_LIMIT);
-      return;
-    }
-    if (isGuest) setGuestUsed((current) => Math.min(current + 1, GUEST_DAILY_LIMIT));
 
     const userMessage: Message = {
       id: nextId.current++,
@@ -369,10 +843,10 @@ export default function Home() {
     setQuery("");
     setIsTyping(true);
     setShowRecommendations(false);
+    setShowPurposeMenu(false);
 
-    const diagnosticKind = detectDiagnosticKind(cleanQuestion, pageContext.pageType);
     const dateQuestion = isDateQuestion(cleanQuestion);
-    const searchExpressionIntent = detectSearchExpressionIntent(cleanQuestion);
+    const diagnosticKind = detectDiagnosticKind(cleanQuestion, pageContext.pageType);
     const sensitive = /주민등록번호|비밀번호|인증키|api\s*key|apikey/i.test(cleanQuestion);
     const generalKnowledgeQuestion = !sensitive && isLikelyGeneralKnowledgeQuestion(cleanQuestion);
 
@@ -391,50 +865,232 @@ export default function Home() {
         return;
       }
 
-      if (searchExpressionIntent) {
-        setMessages((current) => [
-          ...current,
-          {
-            id: nextId.current++,
-            role: "assistant",
-            text: "요청하신 조건으로 BIG KINDS 검색식을 만들었습니다.",
-            searchQuery: { value: searchExpressionIntent.query, description: searchExpressionIntent.description },
-            question: cleanQuestion,
-          },
-        ]);
-        setIsTyping(false);
-        return;
-      }
-
-      if (isChatbotMetaQuestion(cleanQuestion)) {
+      if (isOpenApiQuestion(cleanQuestion)) {
+        recordInsight({ eventType: "OPEN_API_REDIRECT", pageType: pageContext.pageType });
         setMessages((current) => [...current, {
           id: nextId.current++, role: "assistant",
-          text: "저는 빅카인즈 공식 Q&A·FAQ·소개·정책 문서에서 확인되는 이용 방법을 찾아 안내하는 챗봇입니다. 저장된 공식 문서에 근거가 없는 내용은 추정해서 답변하지 않습니다.",
-          isFallback: true, question: cleanQuestion,
+          text: "OPEN API 관련 문의는 뉴스토어에서 확인해 주세요. OPEN API의 구매, 계약, 이용 방법, 오류 및 데이터 활용 관련 사항은 담당 부서에서 안내하고 있습니다.",
+          apiRedirect: true, question: cleanQuestion, intent: "OPEN_API_REDIRECT",
+          actions: [{ id: "open-api", label: "뉴스토어 OPEN API 확인", type: "OPEN_URL", url: OPEN_API_PURCHASE_URL }],
         }]);
         setIsTyping(false);
         return;
       }
 
-      if (isOpenApiQuestion(cleanQuestion)) {
+      const searchContext = aiStateRef.current.searchContext;
+      const previousSearch = getSearchContextStatus(searchContext) === "STALE" ? null : searchContext.input as AiSearchInput | null;
+      const routed = routeUserIntent(cleanQuestion, {
+        hasSearchContext: Boolean(searchContext.input),
+        searchContext,
+        lastCapabilityId: aiStateRef.current.lastCapabilityId,
+        pageType: pageContext.pageType,
+      });
+
+      if (routed.intent === "ARTICLE_UNSUPPORTED") {
         setMessages((current) => [...current, {
           id: nextId.current++, role: "assistant",
-          text: "OPEN API 관련 문의는 뉴스토어에서 확인해 주세요. OPEN API의 구매, 계약, 이용 방법, 오류 및 데이터 활용 관련 사항은 담당 부서에서 안내하고 있습니다.",
-          apiRedirect: true, question: cleanQuestion,
+          text: "기사 원문을 직접 읽거나 요약하는 기능은 제공하지 않습니다. 대신 해당 주제의 기사를 더 정확하게 찾을 수 있도록 검색식을 만들어드릴 수 있습니다.",
+          isFallback: true, intent: "ARTICLE_UNSUPPORTED",
+          actions: [{ id: "article-search-build", label: "검색식 만들어보기", type: "SET_MODE", value: "SEARCH_BUILD" }],
+          question: cleanQuestion,
+        }]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (routed.intent === "META") {
+        setMessages((current) => [...current, {
+          id: nextId.current++, role: "assistant",
+          text: "빅카인즈 검색·분석·다운로드 이용 방법과 공식 안내를 도와드려요. 원하는 목적을 골라보세요.",
+          isFallback: true, question: cleanQuestion, intent: "META",
+          actions: purposeMenu.filter((item) => item.mode !== "OPEN_API").map((item) => ({ id: `meta-${item.label}`, label: item.label, type: "SET_MODE", value: item.mode })),
+        }]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (routed.intent === "SERVICE_OVERVIEW") {
+        const overview = knowledge.find((item) => item.id === "bigkinds-intro-overview");
+        if (overview) {
+          showOfficialDocument(overview, cleanQuestion, "SERVICE_OVERVIEW");
+          setIsTyping(false);
+          return;
+        }
+      }
+
+      if (routed.intent === "SERVICE_GUIDE" && routed.capabilityIds?.length) {
+        const capability = getCapabilitiesById(routed.capabilityIds)[0];
+        const guideDocument = capability
+          ? capability.sourceIds.map((id) => knowledge.find((item) => item.id === id)).find(Boolean)
+          : undefined;
+        if (guideDocument) {
+          showOfficialDocument(guideDocument, cleanQuestion, "SERVICE_GUIDE");
+          setIsTyping(false);
+          return;
+        }
+      }
+
+      if (routed.intent === "SERVICE_FACT") {
+        const coverageQuestion = /1990년대|몇\s*년도|이전\s*뉴스|고신문|신문/i.test(cleanQuestion);
+        const scaleQuestion = /언론사|수록|몇\s*건|보유|전체\s*기사/i.test(cleanQuestion);
+        const factDocument = scaleQuestion
+          ? knowledge.find((item) => item.id === "bigkinds-intro-data-scale")
+          : coverageQuestion ? knowledge.find((item) => item.id === "bigkinds-canonical-coverage")
+          : undefined;
+        if (factDocument) {
+          showOfficialDocument(factDocument, cleanQuestion, "SERVICE_FACT");
+          setIsTyping(false);
+          return;
+        }
+      }
+
+      if (routed.intent === "SEARCH_EXPRESSION_DIAGNOSIS") {
+        const diagnosis = diagnoseSearchExpression(cleanQuestion);
+        if (diagnosis) {
+          showSearchDiagnosis(diagnosis, cleanQuestion);
+          setIsTyping(false);
+          return;
+        }
+      }
+
+      if (routed.intent === "SEARCH_RESULT_DIAGNOSIS") {
+        showSearchResultDiagnosis(cleanQuestion, previousSearch);
+        setIsTyping(false);
+        return;
+      }
+
+      if (routed.intent === "FEATURE_RECOMMENDATION") {
+        if (recommendFeatureForQuestion(cleanQuestion, routed.capabilityIds)) {
+          setIsTyping(false);
+          return;
+        }
+        if (await answerWithAi(cleanQuestion, "ROUTE")) {
+          setIsTyping(false);
+          return;
+        }
+      }
+
+      if (routed.intent === "TROUBLESHOOT") {
+        const diagnosticKind = routed.diagnosticKind;
+        if (diagnosticKind) {
+          setMessages((current) => [...current, {
+            id: nextId.current++, role: "assistant", text: getDiagnosticFlow(diagnosticKind).title,
+            diagnostic: getDiagnosticFlow(diagnosticKind), intent: "TROUBLESHOOT", question: cleanQuestion,
+          }]);
+          updateWorkingState({ lastIntent: "TROUBLESHOOT" });
+          recordInsight({ eventType: "TROUBLESHOOT_USED", pageType: pageContext.pageType });
+          setIsTyping(false);
+          return;
+        }
+      }
+
+      let searchTurn = routed.searchTurn;
+      if (routed.intent === "CLARIFY") {
+        searchTurn = await resolveSearchTurn(cleanQuestion);
+      }
+
+      if (routed.intent === "SEARCH_NEW" || searchTurn?.mode === "NEW") {
+        const answeredBySearchCoach = await answerSearchGoal(cleanQuestion);
+        if (answeredBySearchCoach || (searchTurn?.searchInput && renderSearchCoachMessage(searchTurn.searchInput, cleanQuestion, undefined, [], "NEW"))) {
+          setIsTyping(false);
+          return;
+        }
+      }
+
+      if (routed.intent === "SEARCH_UPDATE" || searchTurn?.mode === "UPDATE") {
+        const input = searchTurn ? applySearchTurn(previousSearch, searchTurn) : null;
+        if (input && renderSearchCoachMessage(input, cleanQuestion, undefined, [], "UPDATE")) {
+          setIsTyping(false);
+          return;
+        }
+      }
+
+      if (routed.intent === "CLARIFY" && searchTurn?.mode === "CLARIFY") {
+        setMessages((current) => [...current, {
+          id: nextId.current++, role: "assistant",
+          text: searchTurn.clarifyingQuestion || "기존 검색식에 조건을 추가할까요, 아니면 새 검색을 시작할까요?",
+          isFallback: true, intent: "CLARIFY", question: cleanQuestion,
+          actions: [
+            { id: "clarify-update", label: "이전 검색 이어가기", type: "SET_MODE", value: "SEARCH_BUILD" },
+            { id: "clarify-new", label: "새 검색 시작", type: "RESET_SEARCH" },
+          ],
+        }]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (routed.intent === "OUT_OF_SCOPE") {
+        setMessages((current) => [...current, {
+          id: nextId.current++, role: "assistant",
+          text: "해당 질문은 빅카인즈 이용 방법과 관련된 질문이 아닙니다. 빅카인즈 검색·분석·다운로드 이용을 안내해 드릴게요.",
+          isFallback: true, intent: "OUT_OF_SCOPE", question: cleanQuestion,
+          actions: [
+            { id: "not-search-news", label: "뉴스 찾기", type: "SET_MODE", value: "NEWS_FIND" },
+            { id: "not-search-guide", label: "이용 안내", type: "SET_MODE", value: "USAGE_GUIDE" },
+          ],
+        }]);
+        updateWorkingState({ lastIntent: "OUT_OF_SCOPE", lastSearchMode: "NOT_SEARCH" });
+        recordInsight({ eventType: "OUT_OF_SCOPE", pageType: pageContext.pageType });
+        setIsTyping(false);
+        return;
+      }
+
+      if (activeMode === "SEARCH_DIAGNOSIS") {
+        const diagnosis = diagnoseSearchExpression(cleanQuestion);
+        if (diagnosis) {
+          showSearchDiagnosis(diagnosis, cleanQuestion);
+          setIsTyping(false);
+          return;
+        }
+      }
+
+      if (diagnosticKind && /안\s*나|없|오류|에러|실패|작동하지|문제/i.test(cleanQuestion)) {
+        setMessages((current) => [...current, {
+          id: nextId.current++, role: "assistant", text: getDiagnosticFlow(diagnosticKind).title,
+          diagnostic: getDiagnosticFlow(diagnosticKind), intent: diagnosticKind === "API_ERROR" ? "OPEN_API_REDIRECT" : "TROUBLESHOOT",
+          question: cleanQuestion,
+        }]);
+        updateWorkingState({ lastIntent: diagnosticKind === "API_ERROR" ? "TROUBLESHOOT" : "SEARCH_DIAGNOSIS" });
+        recordInsight({ eventType: diagnosticKind === "API_ERROR" ? "TROUBLESHOOT_USED" : "SEARCH_DIAGNOSIS_USED", pageType: pageContext.pageType });
+        setIsTyping(false);
+        return;
+      }
+
+      const searchExpressionIntent = detectSearchExpressionIntent(cleanQuestion);
+      if (searchExpressionIntent && !isOpenApiQuestion(cleanQuestion) && !isArticleContentQuestion(cleanQuestion) && !generalKnowledgeQuestion) {
+        if (renderSearchCoachMessage(searchExpressionIntent.input, cleanQuestion, "새로운 검색 주제로 이해했습니다. 요청하신 조건으로 BIG KINDS 검색식을 만들었습니다.", [], "NEW")) {
+          setIsTyping(false);
+          return;
+        }
+      }
+
+      if (isChatbotMetaQuestion(cleanQuestion)) {
+        setMessages((current) => [...current, {
+          id: nextId.current++, role: "assistant",
+          text: "빅카인즈 검색·분석·다운로드 이용 방법과 공식 안내를 도와드려요. 원하는 목적을 골라보세요.",
+          isFallback: true, question: cleanQuestion, intent: "META",
+          actions: purposeMenu.filter((item) => item.mode !== "OPEN_API").map((item) => ({ id: `meta-${item.label}`, label: item.label, type: "SET_MODE", value: item.mode })),
         }]);
         setIsTyping(false);
         return;
       }
 
       if (isStoredArticleCountQuestion(cleanQuestion)) {
+        const scaleDocument = knowledge.find((item) => item.id === "bigkinds-intro-data-scale");
+        if (scaleDocument) {
+          showOfficialDocument(scaleDocument, cleanQuestion, "SERVICE_FACT");
+          setIsTyping(false);
+          return;
+        }
         setMessages((current) => [
           ...current,
           {
             id: nextId.current++,
             role: "assistant",
-            text: `이 챗봇에 저장된 데이터는 뉴스 기사 원문 전체가 아니라 빅카인즈 공식 Q&A·FAQ·소개·정책 문서입니다. 현재 ${dataReady ? `${knowledge.length}건의 공식 문서` : "확인 가능한 공식 문서"}가 저장되어 있으며, 빅카인즈 전체 기사 보유 건수는 이 챗봇 데이터만으로 확인할 수 없습니다.`,
+            text: "저장된 공식 문서에서는 현재 전체 기사 수의 최신 값을 확인할 수 없습니다. 정확한 수록 현황은 빅카인즈 공식 안내에서 확인해 주세요.",
             isFallback: true,
             question: cleanQuestion,
+            intent: "SERVICE_FACT",
           },
         ]);
         setIsTyping(false);
@@ -493,8 +1149,9 @@ export default function Home() {
           {
             id: nextId.current++,
             role: "assistant",
-            text: "이 챗봇에는 뉴스 기사 원문이 저장되어 있지 않아 특정 기사의 요약·본문·내용을 제공할 수 없습니다. 빅카인즈 사이트에서 기사를 직접 확인한 뒤, 검색·분석 이용 방법을 질문해 주세요.",
-            isFallback: true,
+            text: "기사 원문을 직접 읽거나 요약하는 기능은 제공하지 않습니다. 대신 해당 주제의 기사를 더 정확하게 찾을 수 있도록 검색식을 만들어드릴 수 있습니다.",
+            isFallback: true, intent: "ARTICLE_UNSUPPORTED",
+            actions: [{ id: "article-search-build", label: "검색식 만들어보기", type: "SET_MODE", value: "SEARCH_BUILD" }],
             question: cleanQuestion,
           },
         ]);
@@ -508,11 +1165,35 @@ export default function Home() {
           {
             id: nextId.current++,
             role: "assistant",
-            text: "질문의 의도는 일반 상식·시사 정보 확인으로 보이지만, 저장된 빅카인즈 공식 문서에는 해당 내용이 없습니다. 이 챗봇은 빅카인즈 이용 방법과 공식 Q&A 범위에서만 답변할 수 있어요.",
-            isFallback: true,
+            text: "해당 질문은 빅카인즈 이용 방법과 관련된 질문이 아닙니다. 빅카인즈 검색·분석·다운로드·수록 데이터 이용을 안내해 드릴게요.",
+            isFallback: true, intent: "OUT_OF_SCOPE",
+            actions: [
+              { id: "general-news", label: "뉴스 찾기", type: "SET_MODE", value: "NEWS_FIND" },
+              { id: "general-search", label: "검색식 만들기", type: "SET_MODE", value: "SEARCH_BUILD" },
+              { id: "general-feature", label: "기능 추천", type: "SET_MODE", value: "FEATURE_RECOMMENDATION" },
+            ],
             question: cleanQuestion,
           },
         ]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (isSearchGoalQuestion(cleanQuestion)) {
+        const answeredBySearchCoach = await answerSearchGoal(cleanQuestion);
+        if (answeredBySearchCoach) {
+          setIsTyping(false);
+          return;
+        }
+        recordInsight({ eventType: "NO_CONFIDENT_MATCH", pageType: pageContext.pageType });
+        setMessages((current) => [...current, {
+          id: nextId.current++,
+          role: "assistant",
+          text: "찾고 싶은 주제를 검색어와 조건으로 조금 더 구체적으로 알려주세요. 검색식으로 바꾸어 드릴게요.",
+          isFallback: true,
+          fallbackKind: "SEARCH_GOAL",
+          question: cleanQuestion,
+        }]);
         setIsTyping(false);
         return;
       }
@@ -532,7 +1213,13 @@ export default function Home() {
       const searchUsageDocument = isSearchUsageQuestion(cleanQuestion)
         ? knowledge.find((item) => item.id === "bigkinds-intro-overview")
         : undefined;
-      const results = searchHelpDocument
+      const fullTextDownload = /기사.*(?:전체|본문|전문)|(?:전체|본문|전문).*기사/i.test(cleanQuestion);
+      const downloadDocument = routed.intent === "SERVICE_GUIDE"
+        ? knowledge.find((item) => item.id === (fullTextDownload ? "bigkinds-canonical-fulltext-download" : "bigkinds-canonical-download"))
+        : undefined;
+      const results = downloadDocument
+        ? [{ item: downloadDocument, score: 999 }]
+        : searchHelpDocument
         ? [{ item: searchHelpDocument, score: 999 }]
         : searchUsageDocument
           ? [{ item: searchUsageDocument, score: 999 }]
@@ -546,11 +1233,18 @@ export default function Home() {
 
       const confidence = evaluateSearchConfidence(cleanQuestion, safeResults);
       if (diagnosticKind && cleanQuestion.length < 40) {
+        recordInsight({ eventType: "SEARCH_DIAGNOSIS_USED", pageType: pageContext.pageType });
         setMessages((current) => [
           ...current,
           { id: assistantId, role: "assistant", text: getDiagnosticFlow(diagnosticKind).title, diagnostic: getDiagnosticFlow(diagnosticKind), question: cleanQuestion },
         ]);
       } else if (!best || !confidence.accepted || !isAnswerableDocument(best.item)) {
+        const answeredByAi = await answerWithAi(cleanQuestion);
+        if (answeredByAi) {
+          setIsTyping(false);
+          return;
+        }
+        recordInsight({ eventType: "NO_CONFIDENT_MATCH", pageType: pageContext.pageType });
         setMessages((current) => [
           ...current,
           {
@@ -564,6 +1258,8 @@ export default function Home() {
       } else {
         const answerModel = buildAnswerViewModel(best.item);
         const supplementAnswer = null;
+        updateWorkingState({ lastIntent: routed.intent === "SERVICE_FACT" || routed.intent === "SERVICE_GUIDE" ? routed.intent : "FAQ_SEARCH" });
+        recordInsight({ eventType: "FAQ_ANSWERED", pageType: pageContext.pageType, documentId: best.item.id });
         setMessages((current) => [
           ...current,
           {
@@ -575,9 +1271,9 @@ export default function Home() {
             answerModel,
             question: cleanQuestion,
             usedSupplement: Boolean(supplementAnswer),
+            intent: routed.intent === "SERVICE_FACT" || routed.intent === "SERVICE_GUIDE" ? routed.intent : "FAQ_SEARCH",
           },
         ]);
-        saveHistory(cleanQuestion, supplementAnswer || best.item.answer, best.item);
       }
 
       setIsTyping(false);
@@ -590,17 +1286,45 @@ export default function Home() {
   }
 
   function resetConversation() {
-    setMessages([{ ...welcomeMessage, id: nextId.current++ }]);
+    persistCurrentSessionNow();
+    sessionRef.current = createChatSession();
+    sessionIdRef.current = sessionRef.current.id;
+    aiStateRef.current = {
+      lastIntent: null,
+      lastSearchInput: null,
+      lastGeneratedQuery: null,
+      lastCapabilityId: null,
+      activeMode: null,
+      lastSearchMode: null,
+      searchRevision: 0,
+      searchStartedAt: null,
+      searchContext: emptySearchContext(),
+    };
+    setActiveMode(null);
+    const nextMessages = [{ ...welcomeMessage, id: nextId.current++ }];
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
     setFeedback({});
     setFeedbackReasons({});
     setExpandedMessages({});
     setRecommendedQuestions((current) => generateRecommendedQuestions(pageContext.pageType, knowledge, current));
     setShowRecommendations(true);
+    setShowPurposeMenu(true);
+    saveActiveChatSession(sessionRef.current);
   }
 
   function closeWidget() {
+    persistCurrentSessionNow();
     const parentOrigin = document.referrer ? (() => { try { return new URL(document.referrer).origin; } catch { return ""; } })() : "";
     window.parent.postMessage({ type: "bigkinds-chatbot-close" }, parentOrigin || "*");
+  }
+
+  function handleCloseWidget() {
+    if (embedded) closeWidget();
+    else {
+      persistCurrentSessionNow();
+      setChatOpen(false);
+    }
   }
 
   return (
@@ -632,7 +1356,7 @@ export default function Home() {
               </p>
               <div className="metric-row" aria-label="프로토타입 특징">
               <div><strong>{faqCount}</strong><span>공식 FAQ</span></div>
-                <div><strong>{knowledge.length}</strong><span>검색 문서</span></div>
+                <div><strong>공식</strong><span>근거 기반</span></div>
                 <div><strong>0건</strong><span>기사 본문 저장</span></div>
               </div>
               <div className="knowledge-breakdown" aria-label="검색 문서 유형">
@@ -708,7 +1432,7 @@ export default function Home() {
                 <span aria-hidden="true">✓</span>
                 <p><strong>공식 자료를 우선합니다.</strong> 근거가 없으면 추측하지 않습니다.<br />빅카인즈 Q&amp;A는 저장된 공식 문서를 기준으로 안내합니다.</p>
               </div>
-              <p className="guest-landing-note">로그인 없이 하루 최대 5회까지 체험해보세요.</p>
+              <p className="free-usage-note">누구나 무료로 이용할 수 있습니다.</p>
             </div>
 
             <aside className="flow-card" aria-label="답변 생성 흐름">
@@ -727,31 +1451,40 @@ export default function Home() {
             <span className="bot-avatar">B</span>
             <div>
               <strong>빅카인즈 이용 도우미 · Q&amp;A</strong>
-              <span><i /> {dataReady ? `공식 문서 ${knowledge.length}건 · 기사 원문 0건` : "공식 문서 연결 중"}</span>
+              <span><i /> {dataReady ? "공식 문서 기반 · 기사 원문 미저장" : "공식 문서 연결 중"}</span>
             </div>
           </div>
           <div className="header-actions">
             {answeredCount > 0 && (
               <button className="icon-button reset-button" type="button" onClick={resetConversation} aria-label="대화 초기화" title="대화 초기화">↻</button>
             )}
-            <button className="icon-button" type="button" onClick={() => embedded ? closeWidget() : setChatOpen(false)} aria-label="챗봇 닫기">×</button>
+            <button className="icon-button" type="button" onClick={handleCloseWidget} aria-label="챗봇 닫기">×</button>
           </div>
         </header>
 
         <div className="topic-strip" aria-label="빠른 주제 선택">
+          <button type="button" onClick={() => setShowPurposeMenu((current) => !current)} aria-expanded={showPurposeMenu}>
+            {showPurposeMenu ? "메뉴 접기" : "처음 메뉴"}
+          </button>
           <button type="button" onClick={() => setShowQueryBuilder((current) => !current)} aria-expanded={showQueryBuilder}>
             검색식 만들기
           </button>
-          {categoryPrompts.map((item) => (
-            <button key={item.label} type="button" onClick={() => ask(item.question)} disabled={isTyping}>
-              {item.label}
-            </button>
-          ))}
         </div>
 
         {contextLabel && <p className="context-note" role="status">{contextLabel}</p>}
 
-        {showRecommendations && (
+        {showPurposeMenu && (
+          <section className="purpose-panel" aria-label="도움이 필요한 목적 선택">
+            <div className="purpose-heading"><strong>어떤 도움이 필요하신가요?</strong><span>원하는 목적을 고르면 다음 단계부터 안내해 드립니다.</span></div>
+            <div className="purpose-grid">
+              {purposeMenu.map((item) => <button key={item.label} type="button" onClick={() => startMode(item.mode)} disabled={isTyping}><b>{item.label}</b><small>{item.description}</small></button>)}
+            </div>
+            <p className="direct-question-note">직접 질문해도 됩니다.</p>
+            <button className="direct-question-example" type="button" onClick={() => setQuery("반도체와 인공지능 관련 뉴스에서 주가는 빼고 검색하고 싶어요.")}>예: 반도체와 인공지능 관련 뉴스에서 주가는 빼고 검색하고 싶어요.</button>
+          </section>
+        )}
+
+        {showRecommendations && !showPurposeMenu && (
           <section className="recommendation-panel" aria-label="추천 질문">
             <div className="recommendation-heading"><strong>추천 질문</strong><span>페이지와 문서 유형에 맞춰 매번 새로 추천합니다</span></div>
             <div className="recommendation-list">
@@ -814,7 +1547,36 @@ export default function Home() {
                     {matched && <span className="answer-label">{matched.category}</span>}
                     <p>{message.text}</p>
                     {message.apiRedirect && <div className="api-redirect"><button type="button" onClick={() => emitHostAction({ type: "OPEN_URL", label: "뉴스토어 OPEN API 확인", url: OPEN_API_PURCHASE_URL })}>뉴스토어 OPEN API 확인 ↗</button></div>}
-                    {message.searchQuery && <div className="search-query-answer"><strong>추천 검색식</strong><code>{message.searchQuery.value}</code><p>{message.searchQuery.description}</p><div><button type="button" onClick={() => emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: message.searchQuery?.value })}>검색창에 적용</button><button type="button" onClick={() => copyText(message.searchQuery?.value || "")}>검색식 복사</button></div></div>}
+                    {message.searchQuery && (
+                      <div className="search-query-answer">
+                        <strong>검색 조건을 이렇게 이해했습니다</strong>
+                        {message.searchQuery.input && (
+                          <div className="search-query-groups">
+                            {(["all", "any", "exact", "exclude"] as const).map((field) => {
+                              const values = message.searchQuery?.input?.[field] || [];
+                              if (!values.length) return null;
+                              const labels = { all: "모두 포함", any: "하나 이상 포함", exact: "정확 문구", exclude: "제외" };
+                              return <div className="search-query-group" key={field}><span>{labels[field]}</span><div>{values.map((value) => <b key={field + "-" + value}>{value}</b>)}</div></div>;
+                            })}
+                          </div>
+                        )}
+                        <strong>추천 검색식</strong>
+                        <code>{message.searchQuery.value}</code>
+                        <p>{message.searchQuery.description}</p>
+                        {message.suggestedTerms && message.suggestedTerms.length > 0 && <div className="suggested-term-panel"><span>관련 표현도 같이 검색할까요?</span>{message.suggestedTerms.map((suggestion) => <div key={suggestion.baseTerm} className="suggested-term-row"><b>{suggestion.baseTerm}</b>{suggestion.alternatives.map((term) => <button key={term} type="button" onClick={() => handleMessageAction({ id: `suggestion-${term}`, label: term, type: "USE_ALL_SUGGESTIONS", value: JSON.stringify(suggestion) })}>{term}</button>)}</div>)}</div>}
+                        <div>
+                          <button type="button" onClick={() => emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: message.searchQuery?.value })}>검색창에 적용</button>
+                          <button type="button" onClick={() => copyText(message.searchQuery?.value || "")}>검색식 복사</button>
+                          <button type="button" onClick={() => setShowQueryBuilder(true)}>조건 수정</button>
+                          <button type="button" onClick={() => ask("검색식 사용법을 알려줘")}>검색법 보기</button>
+                        </div>
+                      </div>
+                    )}
+                    {message.searchDiagnosis && <div className="search-diagnosis"><strong>검색식 진단</strong><span>입력한 검색식</span><code>{message.searchDiagnosis.input}</code><span>권장 검색식</span><code>{message.searchDiagnosis.suggestion}</code><p>{message.searchDiagnosis.message}</p><div><button type="button" onClick={() => copyText(message.searchDiagnosis?.suggestion || "")}>수정 검색식 복사</button><button type="button" onClick={() => handleMessageAction({ id: "apply-diagnosis-inline", label: "수정 검색식 사용", type: "APPLY_SEARCH_DIAGNOSIS", value: message.searchDiagnosis?.suggestion })}>수정 검색식 사용</button></div></div>}
+                    {message.capabilities && <div className="capability-answer"><strong>추천 기능</strong>{message.capabilities.map((capability) => {
+                      const source = capability.sourceIds.map((id) => knowledge.find((item) => item.id === id)).find(Boolean);
+                      return <article key={capability.id}><div><b>{capability.label}</b><p>{capability.description}</p></div><div><button type="button" onClick={() => ask(`${capability.label} 사용법을 알려줘`)}>사용법 보기</button><a href={source?.source?.url ?? FAQ_SOURCE_URL} target="_blank" rel="noreferrer">공식 근거 ↗</a></div></article>;
+                    })}</div>}
                     {message.answerModel && (
                       <div className="structured-answer">
                         <button className="answer-expand" type="button" aria-expanded={Boolean(expandedMessages[message.id])} onClick={() => setExpandedMessages((current) => ({ ...current, [message.id]: !current[message.id] }))}>{expandedMessages[message.id] ? "간단히 보기" : "자세히 보기"}</button>
@@ -824,6 +1586,7 @@ export default function Home() {
                       </div>
                     )}
                     {message.diagnostic && <div className="diagnostic-flow"><strong>{message.diagnostic.title}</strong><div>{message.diagnostic.options.map((option) => <button type="button" key={option.label} onClick={() => ask(option.question)}>{option.label}</button>)}</div></div>}
+                    {message.actions && message.actions.length > 0 && <div className="message-actions" aria-label="다음 행동">{message.actions.map((action) => <button type="button" key={action.id} onClick={() => handleMessageAction(action)}>{action.label}</button>)}</div>}
                   </div>
 
                   {matched && (
@@ -836,7 +1599,7 @@ export default function Home() {
                       <span>{matched?.source?.label ?? "빅카인즈 공식 FAQ"}{matched?.source?.pages ? ` · ${matched.source.pages}` : ""}</span>
                       <small className="source-guidance">정확한 정보는 위 공식 원문을 확인해 주세요.</small>
                       {message.usedSupplement && <small className="authority-badge">공식 문서 기반 문장 보완</small>}
-                      {matched?.authority && <small className="authority-badge">{matched.authority === "CURRENT_POLICY" ? "현행 정책" : matched.authority === "OFFICIAL_FAQ" ? "공식 FAQ" : matched.authority === "OFFICIAL_INTRO" ? "공식 소개" : matched.authority === "VERIFIED_QNA" ? "검증된 Q&A" : "과거 Q&A 참고"}{matched.status === "REVIEW_REQUIRED" ? " · 검토 필요" : ""}</small>}
+                      {matched?.authority && <small className="authority-badge">{matched.authority === "CURRENT_CANONICAL" ? "최신 공식 기준" : matched.authority === "CURRENT_POLICY" ? "현행 정책" : matched.authority === "CURRENT_OFFICIAL_GUIDE" ? "공식 이용 안내" : matched.authority === "CURRENT_OFFICIAL_INTRO" ? "공식 소개" : matched.authority === "OFFICIAL_FAQ" ? "공식 FAQ" : matched.authority === "VERIFIED_QNA" ? "검증된 Q&A" : "과거 Q&A 참고"}{matched.status === "REVIEW_REQUIRED" ? " · 검토 필요" : ""}</small>}
                       {matched?.effectiveDate && <small className="effective-date">기준일 {matched.effectiveDate}</small>}
                     </div>
                       <div className="feedback" aria-label="답변 평가">
@@ -866,14 +1629,16 @@ export default function Home() {
                     <div className="answer-no-source">관련 공식 문서를 찾지 못했습니다. 저장된 공식 문서 범위 밖의 내용은 추측하지 않습니다.</div>
                   )}
 
-                  {(related.length > 0 || message.isFallback) && (
+                  {(related.length > 0 || message.isFallback || Boolean(message.actions?.length)) && (
                     <div className="related-list">
                       <span>{message.isFallback ? "이런 주제는 답할 수 있어요" : "함께 볼 질문"}</span>
-                      {(message.isFallback ? recommendedQuestions.map((question) => knowledge.find((item) => item.question === question)).filter(Boolean) : related).map((item) => item && (
-                        <button key={item.id} type="button" onClick={() => ask(item.question)}>
-                          {item.question}
-                        </button>
-                      ))}
+                      {message.fallbackKind === "SEARCH_GOAL"
+                        ? searchGoalFallbackQuestions.map((question) => <button key={question} type="button" onClick={() => ask(question)}>{question}</button>)
+                        : (message.isFallback ? recommendedQuestions.map((question) => knowledge.find((item) => item.question === question)).filter(Boolean) : related).map((item) => item && (
+                          <button key={item.id} type="button" onClick={() => ask(item.question)}>
+                            {item.question}
+                          </button>
+                        ))}
                       {message.isFallback && <div className="escalation-actions"><span>해결되지 않으면 문의 내용을 정리해 공식 Q&amp;A로 연결할 수 있습니다.</span><button type="button" onClick={() => copyText(`문의 유형: ${pageContext.pageType}\n질문: ${message.question || message.text}`)}>내용 복사</button><button type="button" onClick={() => emitHostAction({ type: "OPEN_QNA", label: "Q&A 열기", url: QNA_SOURCE_URL })}>Q&amp;A 열기</button></div>}
                     </div>
                   )}
@@ -905,7 +1670,7 @@ export default function Home() {
             <button type="submit" disabled={!query.trim() || isTyping} aria-label="질문 보내기">↑</button>
           </div>
           <p className="disclaimer">빅카인즈 Q&amp;A는 저장된 공식 Q&amp;A·FAQ·소개·정책 문서를 기준으로 안내합니다.<br />정확한 정보와 최신 내용은 출처로 함께 제공되는 공식 원문을 확인해 주세요.</p>
-          <p className="guest-note">로그인 없이 하루 최대 5회까지 체험할 수 있습니다. 오늘 남은 체험: {Math.max(0, GUEST_DAILY_LIMIT - guestUsed)}회</p>
+          <p className="free-note">누구나 무료로 이용할 수 있습니다.</p>
         </form>
       </section>}
       {!embedded && !chatOpen && (

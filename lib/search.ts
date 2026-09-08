@@ -10,7 +10,7 @@ export type SearchableDocument = FaqItem & {
   source?: { label?: string; url?: string; pages?: string };
   facts?: string[];
   steps?: string[];
-  authority?: "CURRENT_POLICY" | "OFFICIAL_FAQ" | "OFFICIAL_INTRO" | "VERIFIED_QNA" | "HISTORICAL_QNA";
+  authority?: "CURRENT_CANONICAL" | "CURRENT_OFFICIAL_INTRO" | "CURRENT_OFFICIAL_GUIDE" | "CURRENT_POLICY" | "OFFICIAL_FAQ" | "VERIFIED_QNA" | "HISTORICAL_QNA";
   status?: "CURRENT" | "REVIEW_REQUIRED" | "SUPERSEDED";
   reviewedAt?: string;
   supersededBy?: string;
@@ -27,8 +27,18 @@ export function isAnswerableDocument(document: SearchableDocument) {
   return document.status === "CURRENT"
     && document.requiresReview !== true
     && document.alwaysEscalate !== true
-    && ["CURRENT_POLICY", "OFFICIAL_FAQ", "OFFICIAL_INTRO", "VERIFIED_QNA"].includes(document.authority ?? "");
+    && ["CURRENT_CANONICAL", "CURRENT_OFFICIAL_INTRO", "CURRENT_OFFICIAL_GUIDE", "CURRENT_POLICY", "OFFICIAL_FAQ", "VERIFIED_QNA"].includes(document.authority ?? "");
 }
+
+export const authorityPrecedence: Record<NonNullable<SearchableDocument["authority"]>, number> = {
+  HISTORICAL_QNA: 0,
+  VERIFIED_QNA: 10,
+  OFFICIAL_FAQ: 20,
+  CURRENT_POLICY: 30,
+  CURRENT_OFFICIAL_GUIDE: 40,
+  CURRENT_OFFICIAL_INTRO: 40,
+  CURRENT_CANONICAL: 50,
+};
 
 const synonymGroups = [
   ["다운", "다운로드", "내려받기", "받기", "엑셀"],
@@ -109,19 +119,12 @@ export function searchFaq(query: string, limit = 3, documents: SearchableDocumen
         if (answer.includes(term)) score += 1;
       });
 
-      const authorityWeight: Record<NonNullable<SearchableDocument["authority"]>, number> = {
-        CURRENT_POLICY: 6,
-        OFFICIAL_FAQ: 5,
-        OFFICIAL_INTRO: 4,
-        VERIFIED_QNA: 2,
-        HISTORICAL_QNA: 0,
-      };
-      if (score > 0) score += authorityWeight[item.authority ?? "HISTORICAL_QNA"];
+      if (score > 0) score += authorityPrecedence[item.authority ?? "HISTORICAL_QNA"] / 10;
       if (item.status === "SUPERSEDED") score -= 100;
 
       return { item, score, directMatch };
     })
     .filter((result) => result.score >= 4 && result.directMatch && result.item.status !== "SUPERSEDED")
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => b.score - a.score || authorityPrecedence[b.item.authority ?? "HISTORICAL_QNA"] - authorityPrecedence[a.item.authority ?? "HISTORICAL_QNA"])
     .slice(0, limit);
 }
