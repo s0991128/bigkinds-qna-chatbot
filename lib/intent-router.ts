@@ -18,6 +18,7 @@ import {
 } from "./question-intents";
 import { getSearchContextStatus } from "./search-context";
 import type { SearchContext, SearchTurnResult } from "./search-context";
+import { isArticleLookupUpdateQuestion, isHistoricalArticleLookupQuestion } from "./article-lookup";
 
 export type UserIntent =
   | "SERVICE_OVERVIEW"
@@ -25,6 +26,7 @@ export type UserIntent =
   | "SERVICE_GUIDE"
   | "OPEN_API_REDIRECT"
   | "ARTICLE_UNSUPPORTED"
+  | "HISTORICAL_ARTICLE_LOOKUP"
   | "META"
   | "SEARCH_EXPRESSION_DIAGNOSIS"
   | "SEARCH_RESULT_DIAGNOSIS"
@@ -41,6 +43,7 @@ export type IntentRoute = {
   capabilityIds?: string[];
   diagnosticKind?: ReturnType<typeof detectDiagnosticKind>;
   sensitive?: boolean;
+  articleLookupUpdate?: boolean;
 };
 
 export type IntentRouteContext = {
@@ -48,13 +51,16 @@ export type IntentRouteContext = {
   pageType: PageType;
   searchContext?: SearchContext | null;
   lastCapabilityId?: string | null;
+  hasArticleLookupContext?: boolean;
 };
 
 const sensitivePattern = /(?:주민\s*등록\s*번호|\b\d{6}[-\s]\d{7}\b|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|(?:01[016789]|02|0[3-6][1-5])[-\s]?\d{3,4}[-\s]?\d{4}|비밀번호|password|인증키|api\s*key|apikey|bearer\s+[A-Za-z0-9._-]+)/i;
 
 export function routeUserIntent(question: string, context: IntentRouteContext): IntentRoute {
   const clean = question.trim();
-  if (sensitivePattern.test(clean)) return { intent: "CLARIFY", sensitive: true };
+  const historicalLookup = isHistoricalArticleLookupQuestion(clean);
+  const lookupUpdate = Boolean(context.hasArticleLookupContext && isArticleLookupUpdateQuestion(clean));
+  if (sensitivePattern.test(clean) && !historicalLookup && !lookupUpdate) return { intent: "CLARIFY", sensitive: true };
   if (isOpenApiQuestion(clean)) return { intent: "OPEN_API_REDIRECT" };
   if (isArticleContentQuestion(clean)) return { intent: "ARTICLE_UNSUPPORTED" };
   if (isChatbotMetaQuestion(clean)) return { intent: "META" };
@@ -66,6 +72,7 @@ export function routeUserIntent(question: string, context: IntentRouteContext): 
     return { intent: "SERVICE_GUIDE", capabilityIds: capabilityIds.length ? capabilityIds : undefined };
   }
   if (isServiceFactQuestion(clean)) return { intent: "SERVICE_FACT" };
+  if (historicalLookup || lookupUpdate) return { intent: "HISTORICAL_ARTICLE_LOOKUP", articleLookupUpdate: lookupUpdate };
   if (isSearchExpressionDiagnosisQuestion(clean)) return { intent: "SEARCH_EXPRESSION_DIAGNOSIS" };
   if (isSearchDiagnosisQuestion(clean)) return { intent: "SEARCH_RESULT_DIAGNOSIS" };
   if (isSearchExpressionBuildQuestion(clean)) return { intent: "SEARCH_NEW" };

@@ -3,6 +3,8 @@ import type { Capability } from "./capabilities";
 import type { DiagnosticFlow } from "./diagnostic-flows";
 import type { SearchDiagnosis } from "./search-diagnostics";
 import type { AiSuggestedTerms } from "./ai/types";
+import type { ArticleLookupContext, ArticleLookupHistorySummary } from "./article-lookup";
+import type { LookupStrategy } from "./article-lookup-strategy";
 
 export const ACTIVE_CHAT_SESSION_KEY = "bigkinds-active-chat-session-v1";
 export const CHAT_SESSIONS_KEY = "bigkinds-chat-sessions-v1";
@@ -42,6 +44,11 @@ export type PersistedChatMessage = {
   answerModel?: AnswerViewModel;
   diagnostic?: DiagnosticFlow;
   searchDiagnosis?: SearchDiagnosis;
+  manualReference?: { label: string; section: string };
+  articleLookupSummary?: ArticleLookupHistorySummary;
+  lookupResultStatus?: "FOUND" | "NOT_FOUND" | "CANDIDATE";
+  replyDraft?: string;
+  lookupStrategies?: LookupStrategy[];
   capabilities?: Capability[];
   suggestedTerms?: AiSuggestedTerms[];
   createdAt?: string;
@@ -65,6 +72,7 @@ export type ChatWorkingState = {
     revision: number;
     updatedAt: string | null;
   };
+  articleLookupContext?: ArticleLookupContext;
 };
 
 export type ChatSession = {
@@ -114,6 +122,7 @@ export function createChatSession(now = new Date().toISOString()): ChatSession {
       searchRevision: 0,
       searchStartedAt: null,
       searchContext: { status: "STALE", input: null, query: null, source: null, revision: 0, updatedAt: null },
+      articleLookupContext: { currentCase: null, selectedStrategyId: null, lastResultStatus: null },
     },
   };
 }

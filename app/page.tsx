@@ -22,6 +22,8 @@ import { archiveChatSession, ChatSession, createChatSession, loadActiveChatSessi
 import type { AiInterpretation, AiIntent, AiRouterResponse, AiSearchInput, AiSuggestedTerms, AiTask } from "../lib/ai/types";
 import { applySearchTurn, createSearchContext, emptySearchContext, getSearchContextStatus } from "../lib/search-context";
 import type { SearchContext, SearchTurnResult } from "../lib/search-context";
+import { buildLookupStrategies, type LookupStrategy } from "../lib/article-lookup-strategy";
+import { createArticleLookupHistorySummary, createLookupReplyDraft, emptyArticleLookupContext, extractArticleLookupCase, isHistoricalArticleLookupQuestion, sanitizeLookupRequestForHistory, updateArticleLookupCase, type ArticleLookupCase, type ArticleLookupContext, type ArticleLookupResultStatus } from "../lib/article-lookup";
 
 declare global {
   interface Window {
@@ -43,15 +45,22 @@ type Message = {
   searchQuery?: { value: string; description: string; input?: AiSearchInput };
   usedSupplement?: boolean;
   capabilities?: Capability[];
+  capabilityComparison?: Capability[];
   fallbackKind?: "SEARCH_GOAL";
   actions?: PersistedMessageAction[];
   intent?: string;
   capabilityId?: string;
   searchDiagnosis?: SearchDiagnosis;
+  manualReference?: { label: string; section: string };
+  articleLookupCase?: ArticleLookupCase;
+  lookupStrategies?: LookupStrategy[];
+  lookupResultStatus?: ArticleLookupResultStatus;
+  replyDraft?: string;
+  articleLookupRequest?: boolean;
   suggestedTerms?: AiSuggestedTerms[];
 };
 
-type StartMode = "NEWS_FIND" | "SEARCH_BUILD" | "SEARCH_DIAGNOSIS" | "FEATURE_RECOMMENDATION" | "TROUBLESHOOT" | "USAGE_GUIDE" | null;
+type StartMode = "NEWS_FIND" | "SEARCH_BUILD" | "SEARCH_DIAGNOSIS" | "FEATURE_RECOMMENDATION" | "TROUBLESHOOT" | "USAGE_GUIDE" | "ARTICLE_LOOKUP" | null;
 type PurposeMode = Exclude<StartMode, null> | "OPEN_API";
 type SearchWorkingState = {
   lastIntent: AiIntent | UserIntent | null;
@@ -63,6 +72,7 @@ type SearchWorkingState = {
   searchRevision: number;
   searchStartedAt: string | null;
   searchContext: SearchContext;
+  articleLookupContext: ArticleLookupContext;
 };
 
 const welcomeMessage: Message = {
@@ -73,6 +83,7 @@ const welcomeMessage: Message = {
 
 const purposeMenu: Array<{ label: string; description: string; mode: PurposeMode }> = [
   { label: "뉴스 찾기", description: "원하는 주제의 기사 찾기", mode: "NEWS_FIND" },
+  { label: "기사·자료 찾기", description: "날짜·언론사·인물·사건 단서로 과거 기사와 지면 자료를 찾습니다.", mode: "ARTICLE_LOOKUP" },
   { label: "검색식 만들기", description: "AND·OR·NOT 없이 조건 만들기", mode: "SEARCH_BUILD" },
   { label: "검색식 진단", description: "검색식 의도와 괄호 확인", mode: "SEARCH_DIAGNOSIS" },
   { label: "기능 추천", description: "목적에 맞는 기능 찾기", mode: "FEATURE_RECOMMENDATION" },
@@ -95,9 +106,19 @@ const dataScriptPaths = [
   ...Array.from({ length: 21 }, (_, index) => `/data/qna-data-${String(index + 1).padStart(2, "0")}.js`),
   "/data/knowledge-base.js",
   "/data/official-intro.js",
+  "/data/manual-knowledge.js",
+  "/data/historical-lookup.js",
 ];
 
 const QNA_SOURCE_URL = "https://www.bigkinds.or.kr/news/qnaList.do";
+const materialTypeLabels: Record<ArticleLookupCase["materialType"], string> = {
+  ARTICLE: "기사",
+  PAGE: "신문 지면",
+  BOX_LIST: "지면 내 명단·박스 가능성",
+  AWARD_LIST: "수상자·표창 명단 가능성",
+  ADVERTISEMENT: "광고 가능성",
+  UNKNOWN: "미확인",
+};
 
 function loadScript(path: string) {
   return new Promise<void>((resolve, reject) => {
@@ -110,7 +131,7 @@ function loadScript(path: string) {
 }
 
 function normalizeKnowledgeDocument(document: SearchableDocument): SearchableDocument {
-  const authority = document.authority ?? (document.id.startsWith("official-faq-") ? "OFFICIAL_FAQ" : document.id.startsWith("bigkinds-intro-") ? "CURRENT_OFFICIAL_INTRO" : document.id.startsWith("qna-") ? "VERIFIED_QNA" : "CURRENT_POLICY");
+  const authority = document.authority ?? (document.id.startsWith("official-faq-") ? "OFFICIAL_FAQ" : document.id.startsWith("bigkinds-intro-") ? "CURRENT_OFFICIAL_INTRO" : document.id.startsWith("manual-") ? "USER_MANUAL_V4_2" : document.id.startsWith("qna-") ? "VERIFIED_QNA" : "CURRENT_POLICY");
   const status = document.status === "SUPERSEDED"
     ? "SUPERSEDED"
     : document.requiresReview === true || document.alwaysEscalate === true
@@ -154,11 +175,11 @@ function toPersistedMessage(message: Message): PersistedChatMessage {
   return {
     id: message.id,
     role: message.role,
-    text: message.text,
+    text: message.articleLookupRequest ? sanitizeLookupRequestForHistory(message.text) : message.text,
     matchedId: message.matchedId,
     relatedIds: message.relatedIds,
     isFallback: message.isFallback,
-    question: message.question,
+    question: message.articleLookupRequest && message.question ? sanitizeLookupRequestForHistory(message.question) : message.question,
     apiRedirect: message.apiRedirect,
     searchQuery: message.searchQuery ? { value: message.searchQuery.value, description: message.searchQuery.description } : undefined,
     searchInput: message.searchQuery?.input,
@@ -169,6 +190,11 @@ function toPersistedMessage(message: Message): PersistedChatMessage {
     answerModel: message.answerModel,
     diagnostic: message.diagnostic,
     searchDiagnosis: message.searchDiagnosis,
+    manualReference: message.manualReference,
+    articleLookupSummary: createArticleLookupHistorySummary(message.articleLookupCase || null),
+    lookupResultStatus: message.lookupResultStatus,
+    replyDraft: message.replyDraft,
+    lookupStrategies: message.lookupStrategies,
     capabilities: message.capabilities,
     suggestedTerms: message.suggestedTerms,
   };
@@ -191,6 +217,10 @@ function fromPersistedMessage(message: PersistedChatMessage): Message {
     answerModel: message.answerModel,
     diagnostic: message.diagnostic,
     searchDiagnosis: message.searchDiagnosis,
+    manualReference: message.manualReference,
+    lookupResultStatus: message.lookupResultStatus,
+    replyDraft: message.replyDraft,
+    lookupStrategies: message.lookupStrategies,
     capabilities: message.capabilities,
     suggestedTerms: message.suggestedTerms,
   };
@@ -233,6 +263,7 @@ export default function Home() {
     searchRevision: 0,
     searchStartedAt: null,
     searchContext: emptySearchContext(),
+    articleLookupContext: emptyArticleLookupContext(),
   });
   const aiStateRef = workingStateRef;
 
@@ -267,6 +298,7 @@ export default function Home() {
           revision: restoredRevision,
           updatedAt: restoredUpdatedAt,
         },
+        articleLookupContext: state.articleLookupContext || emptyArticleLookupContext(),
       };
       startTransition(() => {
         setMessages(restoredMessages);
@@ -339,7 +371,7 @@ export default function Home() {
     const firstUser = currentMessages.find((message) => message.role === "user");
     sessionRef.current.id = sessionIdRef.current;
     sessionRef.current.messages = currentMessages.map(toPersistedMessage);
-    sessionRef.current.title = firstUser?.text ? firstUser.text.slice(0, 80) : sessionRef.current.title;
+    sessionRef.current.title = firstUser?.text ? (firstUser.articleLookupRequest ? sanitizeLookupRequestForHistory(firstUser.text) : firstUser.text).slice(0, 80) : sessionRef.current.title;
     sessionRef.current.updatedAt = new Date().toISOString();
     delete sessionRef.current.closedAt;
     sessionRef.current.workingState = {
@@ -352,6 +384,7 @@ export default function Home() {
       searchRevision: aiStateRef.current.searchRevision,
       searchStartedAt: aiStateRef.current.searchStartedAt,
       searchContext: aiStateRef.current.searchContext,
+      articleLookupContext: aiStateRef.current.articleLookupContext,
     };
     saveActiveChatSession(sessionRef.current);
     if (currentMessages.some((message) => message.role === "user")) archiveChatSession(sessionRef.current);
@@ -590,6 +623,21 @@ export default function Home() {
       VISUALIZATION: "뉴스 분석과 시각화는 어떻게 이용하나요?",
       NETWORK_ANALYSIS: "관계도 분석은 어떻게 써?",
       RELATED_WORDS: "연관어 분석은 어떻게 이용하나요?",
+      KEYWORD_TREND: "키워드 트렌드는 어떻게 사용하나요?",
+      INFORMATION_EXTRACTION: "정보추출은 어떻게 사용하나요?",
+      MORPHEME_NER: "형태소·개체명 분석은 어떻게 사용하나요?",
+      DATA_VISUALIZATION: "분석 결과를 시각화하려면 어떻게 하나요?",
+      VISUALIZATION_REPORT: "시각화보고서는 어떻게 만들어요?",
+      QUOTATION_SEARCH: "정확한 인용문은 어떻게 검색하나요?",
+      SAVED_SEARCH: "검색식 저장은 어떻게 하나요?",
+      LATEST_NEWS: "최신뉴스는 어떻게 보나요?",
+      WEEKLY_ISSUE: "주간이슈는 어떻게 보나요?",
+      REGIONAL_ISSUE: "지역이슈분석은 어떻게 이용하나요?",
+      ISSUE_REPORT: "이슈 리포트는 어떻게 이용하나요?",
+      LEGISLATOR_NEWS: "국회의원 뉴스 분석은 어떻게 하나요?",
+      MY_NEWS: "나의 뉴스는 어떻게 관리하나요?",
+      SCRAP: "스크랩한 뉴스는 어디서 보나요?",
+      MY_ANALYSIS: "나의 분석 자료는 어디서 보나요?",
       OLD_NEWSPAPER: "고신문은 어떻게 이용하나요?",
     };
     updateWorkingState({ lastIntent: "FEATURE_RECOMMENDATION", lastCapabilityId: matches[0]?.id || null });
@@ -602,7 +650,21 @@ export default function Home() {
     return true;
   }
 
+  function showCapabilityComparison(cleanQuestion: string) {
+    const matches = getCapabilitiesById(["NETWORK_ANALYSIS", "RELATED_WORDS", "KEYWORD_TREND", "INFORMATION_EXTRACTION"])
+      .filter((capability) => capabilitySourcesExist(capability, knowledge));
+    if (matches.length < 2) return false;
+    updateWorkingState({ lastIntent: "FEATURE_RECOMMENDATION", lastCapabilityId: null });
+    setMessages((current) => [...current, {
+      id: nextId.current++, role: "assistant", text: "기능 비교: 목적에 따라 이렇게 구분할 수 있습니다.",
+      capabilityComparison: matches, intent: "FEATURE_RECOMMENDATION", question: cleanQuestion,
+    }]);
+    matches.forEach((capability) => recordInsight({ eventType: "FEATURE_RECOMMENDED", pageType: pageContext.pageType, capabilityId: capability.id }));
+    return true;
+  }
+
   function recommendFeatureForQuestion(cleanQuestion: string, capabilityIds?: string[]) {
+    if (/관계도.*연관어|연관어.*관계도|관계도.*차이|연관어.*차이/i.test(cleanQuestion) && showCapabilityComparison(cleanQuestion)) return true;
     const matches = (capabilityIds?.length ? getCapabilitiesById(capabilityIds) : recommendCapabilities(cleanQuestion))
       .filter((capability) => capabilitySourcesExist(capability, knowledge));
     return showCapabilityRecommendation(matches, cleanQuestion);
@@ -669,6 +731,114 @@ export default function Home() {
     return renderSearchCoachMessage(normalizeSearchInput(simpleInput), cleanQuestion, undefined, [], "NEW");
   }
 
+  function showArticleLookupCase(question: string, isUpdate = false) {
+    const currentCase = aiStateRef.current.articleLookupContext.currentCase;
+    const articleLookupCase = isUpdate && currentCase
+      ? updateArticleLookupCase(currentCase, question)
+      : extractArticleLookupCase(question);
+    updateWorkingState({
+      activeMode: "ARTICLE_LOOKUP",
+      lastIntent: "HISTORICAL_ARTICLE_LOOKUP",
+      articleLookupContext: {
+        currentCase: articleLookupCase,
+        selectedStrategyId: isUpdate ? aiStateRef.current.articleLookupContext.selectedStrategyId : null,
+        lastResultStatus: isUpdate ? aiStateRef.current.articleLookupContext.lastResultStatus : null,
+      },
+    });
+    setMessages((current) => [...current, {
+      id: nextId.current++, role: "assistant",
+      text: isUpdate ? "수정한 단서를 반영했습니다. 찾으시는 자료의 조건을 다시 확인해 주세요." : "찾으시는 자료의 조건을 이렇게 이해했습니다.",
+      articleLookupCase,
+      intent: "HISTORICAL_ARTICLE_LOOKUP",
+      actions: [
+        { id: "confirm-lookup-case", label: "이 조건으로 찾기", type: "CONFIRM_LOOKUP_CASE" },
+        { id: "edit-lookup-case", label: "조건 수정", type: "EDIT_LOOKUP_CASE" },
+        { id: "reset-lookup-case", label: "처음부터 다시", type: "RESET_ARTICLE_LOOKUP" },
+      ],
+    }]);
+    if (!isUpdate) recordInsight({ eventType: "ARTICLE_LOOKUP_STARTED", pageType: pageContext.pageType });
+  }
+
+  function showLookupStrategies() {
+    const articleLookupCase = aiStateRef.current.articleLookupContext.currentCase;
+    if (!articleLookupCase) return;
+    const lookupStrategies = buildLookupStrategies(articleLookupCase);
+    setMessages((current) => [...current, {
+      id: nextId.current++, role: "assistant",
+      text: lookupStrategies.length ? "다음 순서로 찾아보는 것을 권장합니다." : "현재 단서만으로는 검색식을 만들기 어렵습니다. 기간·언론사·인물·소속 중 아는 정보를 더 입력해 주세요.",
+      articleLookupCase,
+      lookupStrategies,
+      intent: "HISTORICAL_ARTICLE_LOOKUP",
+      actions: lookupStrategies.length ? [{ id: "edit-lookup-after-strategy", label: "조건 수정", type: "EDIT_LOOKUP_CASE" }] : [{ id: "edit-lookup-missing", label: "단서 추가", type: "EDIT_LOOKUP_CASE" }],
+    }]);
+  }
+
+  function useLookupStrategy(strategyId: string) {
+    const articleLookupCase = aiStateRef.current.articleLookupContext.currentCase;
+    if (!articleLookupCase) return;
+    const strategy = buildLookupStrategies(articleLookupCase).find((item) => item.id === strategyId);
+    if (!strategy) return;
+    updateWorkingState({ articleLookupContext: { ...aiStateRef.current.articleLookupContext, selectedStrategyId: strategyId } });
+    recordInsight({ eventType: "ARTICLE_LOOKUP_STRATEGY_USED", pageType: pageContext.pageType });
+    setMessages((current) => [...current, {
+      id: nextId.current++, role: "assistant",
+      text: `선택한 검색식: ${strategy.query}\nBIGKinds에서 검색한 뒤 결과 상태를 선택해 주세요.`,
+      articleLookupCase,
+      lookupStrategies: [strategy],
+      intent: "HISTORICAL_ARTICLE_LOOKUP",
+      actions: [
+        { id: "lookup-found", label: "관련 자료를 찾았어요", type: "SET_LOOKUP_RESULT", value: "FOUND" },
+        { id: "lookup-not-found", label: "찾지 못했어요", type: "SET_LOOKUP_RESULT", value: "NOT_FOUND" },
+        { id: "lookup-candidate", label: "비슷한 자료만 있어요", type: "SET_LOOKUP_RESULT", value: "CANDIDATE" },
+      ],
+    }]);
+  }
+
+  function setLookupResultStatus(result: ArticleLookupResultStatus) {
+    const articleLookupCase = aiStateRef.current.articleLookupContext.currentCase;
+    if (!articleLookupCase) return;
+    updateWorkingState({ articleLookupContext: { ...aiStateRef.current.articleLookupContext, lastResultStatus: result } });
+    const eventType = result === "FOUND" ? "ARTICLE_LOOKUP_FOUND" : result === "NOT_FOUND" ? "ARTICLE_LOOKUP_NO_RESULT" : "ARTICLE_LOOKUP_CANDIDATE";
+    recordInsight({ eventType, pageType: pageContext.pageType });
+    const notFound = result === "NOT_FOUND";
+    setMessages((current) => [...current, {
+      id: nextId.current++, role: "assistant",
+      text: result === "FOUND"
+        ? "관련 자료를 찾으셨군요. 기사 제목·날짜·URL을 확인해 두면 후속 회신에 반영할 수 있습니다."
+        : result === "CANDIDATE"
+          ? "비슷한 자료는 확인됐지만 정확히 동일한 자료인지 추가 확인이 필요합니다."
+          : "현재 입력한 조건의 BIGKinds 검색에서는 요청 자료를 확인하지 못했습니다.",
+      articleLookupCase,
+      lookupResultStatus: result,
+      intent: "HISTORICAL_ARTICLE_LOOKUP",
+      actions: notFound ? [
+        { id: "lookup-expand-period", label: "기간 넓혀보기", type: "USE_LOOKUP_STRATEGY", value: "lookup-expand-period" },
+        { id: "lookup-edit-terms", label: "다른 검색어 시도", type: "EDIT_LOOKUP_CASE" },
+        { id: "lookup-page-guidance", label: "원지면 확인 방법", type: "SHOW_LOOKUP_GUIDANCE" },
+        { id: "lookup-reply", label: "문의 회신 초안", type: "GENERATE_LOOKUP_REPLY" },
+      ] : [
+        { id: "lookup-reply", label: "문의 회신 초안", type: "GENERATE_LOOKUP_REPLY" },
+        { id: "lookup-edit", label: "조건 수정", type: "EDIT_LOOKUP_CASE" },
+      ],
+    }]);
+  }
+
+  function showLookupReplyDraft() {
+    const articleLookupCase = aiStateRef.current.articleLookupContext.currentCase;
+    const result = aiStateRef.current.articleLookupContext.lastResultStatus;
+    if (!articleLookupCase || !result) return;
+    const replyDraft = createLookupReplyDraft(articleLookupCase, result);
+    if (!replyDraft) return;
+    recordInsight({ eventType: "ARTICLE_LOOKUP_REPLY_DRAFTED", pageType: pageContext.pageType });
+    setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "문의 회신 초안입니다. 담당자명과 연락처는 자동으로 넣지 않았습니다.", articleLookupCase, lookupResultStatus: result, replyDraft, intent: "HISTORICAL_ARTICLE_LOOKUP" }]);
+  }
+
+  function resetArticleLookup() {
+    setActiveMode("ARTICLE_LOOKUP");
+    updateWorkingState({ activeMode: "ARTICLE_LOOKUP", lastIntent: "HISTORICAL_ARTICLE_LOOKUP", articleLookupContext: emptyArticleLookupContext() });
+    setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "찾으시는 자료에 대해 알고 있는 내용을 입력해 주세요.\n\n예: 1997년 7월경 매일경제에 실린 아시아나 직원의 노동부장관 표창 명단을 찾고 싶어요.", intent: "ARTICLE_LOOKUP" }]);
+  }
+
   function startMode(mode: PurposeMode) {
     setShowPurposeMenu(false);
     setShowRecommendations(false);
@@ -689,6 +859,7 @@ export default function Home() {
       SEARCH_BUILD: { text: "AND·OR·NOT을 몰라도 괜찮아요. 포함하거나 제외할 주제를 문장으로 입력해 주세요.\n예: 인공지능과 반도체가 들어가고 주가는 빼줘." },
       SEARCH_DIAGNOSIS: { text: "확인하고 싶은 검색식을 입력해 주세요.\n예: AI OR 인공지능 AND 반도체" },
       FEATURE_RECOMMENDATION: { text: "빅카인즈에서 하고 싶은 일을 설명해 주세요.\n예: 기사에서 어떤 기업들이 같이 언급되는지 보고 싶어요." },
+      ARTICLE_LOOKUP: { text: "찾으시는 자료에 대해 알고 있는 내용을 입력해 주세요.\n\n예: 1997년 7월경 매일경제에 실린 아시아나 직원의 노동부장관 표창 명단을 찾고 싶어요." },
       TROUBLESHOOT: { text: "검색·다운로드 중 어떤 문제가 있었는지 평소 말하듯 입력해 주세요." },
       USAGE_GUIDE: {
         text: "어떤 이용 안내가 필요하신가요?",
@@ -710,6 +881,16 @@ export default function Home() {
 
   function handleMessageAction(action: PersistedMessageAction) {
     if (action.type === "SET_MODE" && action.value) startMode(action.value as PurposeMode);
+    else if (action.type === "CONFIRM_LOOKUP_CASE") showLookupStrategies();
+    else if (action.type === "EDIT_LOOKUP_CASE") setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "수정할 조건을 입력해 주세요.\n예: 기간을 1997년 6~8월로 바꿔줘, 언론사는 매일경제만, 아시아나항공도 검색어에 넣어줘.", intent: "ARTICLE_LOOKUP" }]);
+    else if (action.type === "RESET_ARTICLE_LOOKUP") resetArticleLookup();
+    else if (action.type === "USE_LOOKUP_STRATEGY" && action.value) useLookupStrategy(action.value);
+    else if (action.type === "SET_LOOKUP_RESULT" && (action.value === "FOUND" || action.value === "NOT_FOUND" || action.value === "CANDIDATE")) setLookupResultStatus(action.value);
+    else if (action.type === "GENERATE_LOOKUP_REPLY") showLookupReplyDraft();
+    else if (action.type === "SHOW_LOOKUP_GUIDANCE") {
+      recordInsight({ eventType: "ARTICLE_LOOKUP_ESCALATED", pageType: pageContext.pageType });
+      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "일반 기사 형태가 아니라 지면의 별도 명단·박스 자료일 가능성이 있습니다. BIGKinds는 협약 언론사로부터 제공받은 기사 데이터를 기반으로 하므로, 정확한 원지면 확인이 필요하면 해당 언론사에 해당 일자·지면의 열람 가능 여부를 문의할 수 있습니다.", intent: "HISTORICAL_ARTICLE_LOOKUP" }]);
+    }
     else if (action.type === "COPY_QUERY" && action.value) void copyText(action.value);
     else if (action.type === "OPEN_URL" && action.url) emitHostAction({ type: "OPEN_URL", label: action.label, url: action.url });
     else if (action.type === "SHOW_GUIDE" && action.value) ask(action.value);
@@ -760,6 +941,7 @@ export default function Home() {
       id: nextId.current++, role: "assistant",
       text: diagnosis.message,
       searchDiagnosis: diagnosis,
+      manualReference: { label: "빅카인즈 사용자매뉴얼 v4.2", section: "4.1" },
       question,
       intent: "SEARCH_DIAGNOSIS",
       actions: [
@@ -790,6 +972,9 @@ export default function Home() {
         { id: "add-exact", label: "정확한 문구 지정", type: "SET_MODE", value: "SEARCH_BUILD" },
         { id: "add-exclude", label: "제외할 단어 추가", type: "SET_MODE", value: "SEARCH_BUILD" },
         { id: "check-period", label: "검색기간 확인", type: "SHOW_GUIDE", value: "검색기간은 어떻게 설정하나요?" },
+        { id: "check-media", label: "언론사 지정", type: "SHOW_GUIDE", value: "언론사는 어디에서 선택하나요?" },
+        { id: "check-category", label: "통합분류 선택", type: "SHOW_GUIDE", value: "통합분류는 어떻게 선택하나요?" },
+        { id: "check-within-results", label: "결과 내 재검색", type: "SHOW_GUIDE", value: "검색결과 안에서 다시 검색할 수 있나요?" },
       ],
     }]);
     updateWorkingState({ lastIntent: "SEARCH_DIAGNOSIS", lastSearchMode: "DIAGNOSIS" });
@@ -807,7 +992,7 @@ export default function Home() {
         { id: "overview-guide", label: "이용 방법", type: "SET_MODE", value: "USAGE_GUIDE" },
       );
     } else if (document.source?.url) {
-      actions.push({ id: `source-${document.id}`, label: "공식 원문 보기", type: "OPEN_URL", url: document.source.url });
+      actions.push({ id: `source-${document.id}`, label: document.sourceType === "USER_MANUAL" ? "매뉴얼 근거 보기" : "공식 원문 보기", type: "OPEN_URL", url: document.source.url });
     }
     const summary = intent === "SERVICE_OVERVIEW"
       ? `${answerModel.summary}\n\n주요 활용:\n${(document.facts || []).map((fact) => `- ${fact}`).join("\n")}\n\n어떤 작업을 하시려는지 알려주시면 맞는 기능을 찾아드릴게요.`
@@ -817,6 +1002,9 @@ export default function Home() {
       : intent === "SERVICE_FACT" ? "SERVICE_FACT_USED" : "SERVICE_GUIDE_USED";
     updateWorkingState({ lastIntent: intent });
     recordInsight({ eventType, pageType: pageContext.pageType, documentId: document.id });
+    if (document.sourceType === "USER_MANUAL") {
+      recordInsight({ eventType: "MANUAL_GUIDE_USED", pageType: pageContext.pageType, documentId: document.id, capabilityId: document.capabilityIds?.[0] });
+    }
     setMessages((current) => [...current, {
       id: nextId.current++,
       role: "assistant",
@@ -832,11 +1020,16 @@ export default function Home() {
   function ask(question: string) {
     const cleanQuestion = question.trim();
     if (!cleanQuestion || isTyping) return;
+    const articleLookupRequest = aiStateRef.current.activeMode === "ARTICLE_LOOKUP"
+      || Boolean(aiStateRef.current.articleLookupContext.currentCase)
+      || isHistoricalArticleLookupQuestion(cleanQuestion);
 
     const userMessage: Message = {
       id: nextId.current++,
       role: "user",
       text: cleanQuestion,
+      articleLookupRequest,
+      intent: articleLookupRequest ? "HISTORICAL_ARTICLE_LOOKUP" : undefined,
     };
 
     setMessages((current) => [...current, userMessage]);
@@ -884,6 +1077,7 @@ export default function Home() {
         searchContext,
         lastCapabilityId: aiStateRef.current.lastCapabilityId,
         pageType: pageContext.pageType,
+        hasArticleLookupContext: Boolean(aiStateRef.current.articleLookupContext.currentCase),
       });
 
       if (routed.intent === "ARTICLE_UNSUPPORTED") {
@@ -930,6 +1124,15 @@ export default function Home() {
         }
       }
 
+      if (routed.intent === "SERVICE_GUIDE") {
+        const manualGuide = searchFaq(cleanQuestion, 1, knowledge, { preferredAuthority: "USER_MANUAL_V4_2" })[0]?.item;
+        if (manualGuide?.sourceType === "USER_MANUAL") {
+          showOfficialDocument(manualGuide, cleanQuestion, "SERVICE_GUIDE");
+          setIsTyping(false);
+          return;
+        }
+      }
+
       if (routed.intent === "SERVICE_FACT") {
         const coverageQuestion = /1990년대|몇\s*년도|이전\s*뉴스|고신문|신문/i.test(cleanQuestion);
         const scaleQuestion = /언론사|수록|몇\s*건|보유|전체\s*기사/i.test(cleanQuestion);
@@ -942,6 +1145,12 @@ export default function Home() {
           setIsTyping(false);
           return;
         }
+      }
+
+      if (routed.intent === "HISTORICAL_ARTICLE_LOOKUP" || (aiStateRef.current.activeMode === "ARTICLE_LOOKUP" && routed.intent === "CLARIFY")) {
+        showArticleLookupCase(cleanQuestion, Boolean(routed.articleLookupUpdate));
+        setIsTyping(false);
+        return;
       }
 
       if (routed.intent === "SEARCH_EXPRESSION_DIAGNOSIS") {
@@ -1223,7 +1432,7 @@ export default function Home() {
         ? [{ item: searchHelpDocument, score: 999 }]
         : searchUsageDocument
           ? [{ item: searchUsageDocument, score: 999 }]
-          : searchFaq(cleanQuestion, 3, knowledge);
+          : searchFaq(cleanQuestion, 3, knowledge, { excludeFreshnessSensitive: routed.intent === "SERVICE_FACT" });
       const privacyDocument = knowledge.find((item) => item.id === "privacy-security");
       const safeResults = sensitive && privacyDocument
         ? [{ item: privacyDocument, score: 999 }]
@@ -1547,6 +1756,18 @@ export default function Home() {
                     {matched && <span className="answer-label">{matched.category}</span>}
                     <p>{message.text}</p>
                     {message.apiRedirect && <div className="api-redirect"><button type="button" onClick={() => emitHostAction({ type: "OPEN_URL", label: "뉴스토어 OPEN API 확인", url: OPEN_API_PURCHASE_URL })}>뉴스토어 OPEN API 확인 ↗</button></div>}
+                    {message.articleLookupCase && <div className="article-lookup-card"><strong>자료 찾기 조건</strong><dl>{[
+                      ["기간", message.articleLookupCase.period.originalText || (message.articleLookupCase.period.from ? `${message.articleLookupCase.period.from} ~ ${message.articleLookupCase.period.to}` : "")],
+                      ["언론사", message.articleLookupCase.media.join(", ")],
+                      ["인물", message.articleLookupCase.persons.join(", ")],
+                      ["소속", message.articleLookupCase.organizations.join(", ")],
+                      ["직위", message.articleLookupCase.roles.join(", ")],
+                      ["주제", [...message.articleLookupCase.events, ...message.articleLookupCase.awards].filter((item, index, values) => values.indexOf(item) === index).join(", ")],
+                      ["지면 단서", message.articleLookupCase.pageHints.join(", ")],
+                      ["자료 형태", materialTypeLabels[message.articleLookupCase.materialType]],
+                    ].filter(([, value]) => value).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div>}
+                    {message.lookupStrategies && message.lookupStrategies.length > 0 && <div className="lookup-strategies"><strong>검색 전략</strong>{message.lookupStrategies.map((strategy, index) => <article key={strategy.id}><span>{index + 1}</span><div><b>{strategy.title}</b><p>{strategy.description}</p><code>{strategy.query}</code>{strategy.dateFrom && <small>기간 {strategy.dateFrom} ~ {strategy.dateTo}</small>}{strategy.media?.length ? <small>언론사 {strategy.media.join(", ")}</small> : null}{strategy.relatedSuggestions?.length ? <small>검색 범위를 넓히기 위한 관련 표현: {strategy.relatedSuggestions.join(", ")}</small> : null}<div><button type="button" onClick={() => copyText(strategy.query)}>검색식 복사</button><button type="button" onClick={() => embedded ? emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: strategy.query }) : emitHostAction({ type: "OPEN_URL", label: "BIGKinds 검색화면 열기", url: "https://www.bigkinds.or.kr/v2/news/search.do" })}>BIGKinds에서 검색</button><button type="button" onClick={() => useLookupStrategy(strategy.id)}>이 전략 사용</button></div></div></article>)}</div>}
+                    {message.replyDraft && <div className="lookup-reply-draft"><strong>문의 회신 초안</strong><p>{message.replyDraft}</p><button type="button" onClick={() => copyText(message.replyDraft || "")}>초안 복사</button></div>}
                     {message.searchQuery && (
                       <div className="search-query-answer">
                         <strong>검색 조건을 이렇게 이해했습니다</strong>
@@ -1572,10 +1793,20 @@ export default function Home() {
                         </div>
                       </div>
                     )}
-                    {message.searchDiagnosis && <div className="search-diagnosis"><strong>검색식 진단</strong><span>입력한 검색식</span><code>{message.searchDiagnosis.input}</code><span>권장 검색식</span><code>{message.searchDiagnosis.suggestion}</code><p>{message.searchDiagnosis.message}</p><div><button type="button" onClick={() => copyText(message.searchDiagnosis?.suggestion || "")}>수정 검색식 복사</button><button type="button" onClick={() => handleMessageAction({ id: "apply-diagnosis-inline", label: "수정 검색식 사용", type: "APPLY_SEARCH_DIAGNOSIS", value: message.searchDiagnosis?.suggestion })}>수정 검색식 사용</button></div></div>}
+                    {message.searchDiagnosis && <div className="search-diagnosis"><strong>검색식 진단</strong><span>입력한 검색식</span><code>{message.searchDiagnosis.input}</code><span>권장 검색식</span><code>{message.searchDiagnosis.suggestion}</code><p>{message.searchDiagnosis.message}</p>{message.manualReference && <small className="authority-badge">{message.manualReference.label} 검색하기 {message.manualReference.section} 기준</small>}<div><button type="button" onClick={() => copyText(message.searchDiagnosis?.suggestion || "")}>수정 검색식 복사</button><button type="button" onClick={() => handleMessageAction({ id: "apply-diagnosis-inline", label: "수정 검색식 사용", type: "APPLY_SEARCH_DIAGNOSIS", value: message.searchDiagnosis?.suggestion })}>수정 검색식 사용</button></div></div>}
                     {message.capabilities && <div className="capability-answer"><strong>추천 기능</strong>{message.capabilities.map((capability) => {
                       const source = capability.sourceIds.map((id) => knowledge.find((item) => item.id === id)).find(Boolean);
                       return <article key={capability.id}><div><b>{capability.label}</b><p>{capability.description}</p></div><div><button type="button" onClick={() => ask(`${capability.label} 사용법을 알려줘`)}>사용법 보기</button><a href={source?.source?.url ?? FAQ_SOURCE_URL} target="_blank" rel="noreferrer">공식 근거 ↗</a></div></article>;
+                    })}</div>}
+                    {message.capabilityComparison && <div className="capability-answer capability-comparison"><strong>기능 비교</strong>{message.capabilityComparison.map((capability) => {
+                      const comparison = capability.id === "NETWORK_ANALYSIS"
+                        ? "인물·기관·장소·키워드 사이의 연결관계를 확인합니다."
+                        : capability.id === "RELATED_WORDS"
+                          ? "검색어와 함께 많이 나타나는 관련 키워드를 확인합니다."
+                          : capability.id === "KEYWORD_TREND"
+                            ? "시간에 따른 기사량과 검색어 흐름을 확인합니다."
+                            : "기사 문장에서 특정 정보와 값을 추출합니다.";
+                      return <article key={capability.id}><div><b>{capability.label}</b><p>{comparison}</p></div><button type="button" onClick={() => ask(`${capability.label} 사용법을 알려줘`)}>사용 방법 보기</button></article>;
                     })}</div>}
                     {message.answerModel && (
                       <div className="structured-answer">
@@ -1596,10 +1827,10 @@ export default function Home() {
                       <a href={matched?.source?.url ?? FAQ_SOURCE_URL} target="_blank" rel="noreferrer">
                         {matched.title || matched.question} ↗
                       </a>
-                      <span>{matched?.source?.label ?? "빅카인즈 공식 FAQ"}{matched?.source?.pages ? ` · ${matched.source.pages}` : ""}</span>
+                      <span>{matched?.source?.label ?? "빅카인즈 공식 FAQ"}{matched?.section ? ` · ${matched.section}` : ""}{matched?.source?.pages ? ` · ${matched.source.pages}` : ""}{matched?.source?.document ? ` · ${matched.source.document}` : ""}</span>
                       <small className="source-guidance">정확한 정보는 위 공식 원문을 확인해 주세요.</small>
                       {message.usedSupplement && <small className="authority-badge">공식 문서 기반 문장 보완</small>}
-                      {matched?.authority && <small className="authority-badge">{matched.authority === "CURRENT_CANONICAL" ? "최신 공식 기준" : matched.authority === "CURRENT_POLICY" ? "현행 정책" : matched.authority === "CURRENT_OFFICIAL_GUIDE" ? "공식 이용 안내" : matched.authority === "CURRENT_OFFICIAL_INTRO" ? "공식 소개" : matched.authority === "OFFICIAL_FAQ" ? "공식 FAQ" : matched.authority === "VERIFIED_QNA" ? "검증된 Q&A" : "과거 Q&A 참고"}{matched.status === "REVIEW_REQUIRED" ? " · 검토 필요" : ""}</small>}
+                      {matched?.authority && <small className="authority-badge">{matched.authority === "CURRENT_CANONICAL" ? "최신 공식 기준" : matched.authority === "CURRENT_POLICY" ? "현행 정책" : matched.authority === "CURRENT_OFFICIAL_GUIDE" || matched.authority === "CURRENT_GUIDE" ? "공식 이용 안내" : matched.authority === "CURRENT_OFFICIAL_INTRO" ? "공식 소개" : matched.authority === "USER_MANUAL_V4_2" ? "사용자매뉴얼 v4.2" : matched.authority === "OFFICIAL_FAQ" ? "공식 FAQ" : matched.authority === "VERIFIED_QNA" ? "검증된 Q&A" : "과거 Q&A 참고"}{matched.status === "REVIEW_REQUIRED" ? " · 검토 필요" : ""}</small>}
                       {matched?.effectiveDate && <small className="effective-date">기준일 {matched.effectiveDate}</small>}
                     </div>
                       <div className="feedback" aria-label="답변 평가">

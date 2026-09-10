@@ -15,7 +15,10 @@ export function buildAnswerViewModel(item: SearchableDocument): AnswerViewModel 
   const paragraphs = formatAnswer(item.answer).split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
   const summary = paragraphs[0] || item.question;
   const derivedSteps = item.steps?.length ? item.steps : paragraphs.slice(1).filter((part) => /^\d+\.|^[•·-]/.test(part));
-  const cautions = item.facts?.filter((fact) => /주의|유의|필요|제한|금지|다만|확인/.test(fact)) ?? [];
+  const cautions = [...new Set([
+    ...(item.cautions ?? []),
+    ...(item.facts?.filter((fact) => /주의|유의|필요|제한|금지|다만|확인/.test(fact)) ?? []),
+  ])];
   return {
     summary,
     details: formatAnswer(item.answer),

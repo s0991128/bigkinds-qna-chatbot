@@ -74,7 +74,7 @@ export default function HistoryPage() {
                 <div className="history-card-meta"><span>대화 세션</span><time dateTime={session.updatedAt}>{formatDate(session.updatedAt)}</time></div>
                 <h2>{session.title}</h2>
                 <p>{formatDate(session.startedAt)} · 대화 {userCount}개{lastQuery ? ` · ${lastQuery}` : ""}</p>
-                <details><summary>대화 보기</summary><div className="session-transcript">{session.messages.map((message) => <div className={`history-message ${message.role}`} key={`${session.id}-${message.id}`}><b>{message.role === "user" ? "사용자" : "AI"}</b><p>{message.text}</p>{message.searchQuery?.value && <code>{message.searchQuery.value}</code>}{message.apiRedirect && <small>OPEN API 뉴스토어 안내</small>}</div>)}</div></details>
+                <details><summary>대화 보기</summary><div className="session-transcript">{session.messages.map((message) => <div className={`history-message ${message.role}`} key={`${session.id}-${message.id}`}><b>{message.role === "user" ? "사용자" : "AI"}</b><p>{message.text}</p>{message.searchQuery?.value && <code>{message.searchQuery.value}</code>}{message.lookupStrategies?.map((strategy) => <code key={strategy.id}>{strategy.query}</code>)}{message.articleLookupSummary && <small>자료 찾기 · {message.articleLookupSummary.period.originalText || "기간 미확인"} · {message.articleLookupSummary.media.join(", ") || "언론사 미확인"} · {message.articleLookupSummary.materialType}</small>}{message.lookupResultStatus && <small>검색 결과 상태 · {message.lookupResultStatus}</small>}{message.apiRedirect && <small>OPEN API 뉴스토어 안내</small>}</div>)}</div></details>
               </article>;
             })}
           </div>

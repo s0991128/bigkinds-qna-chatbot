@@ -7,10 +7,23 @@ export type SearchableDocument = FaqItem & {
   alwaysEscalate?: boolean;
   requiresReview?: boolean;
   effectiveDate?: string;
-  source?: { label?: string; url?: string; pages?: string };
+  source?: { label?: string; url?: string; pages?: string; document?: string };
   facts?: string[];
   steps?: string[];
-  authority?: "CURRENT_CANONICAL" | "CURRENT_OFFICIAL_INTRO" | "CURRENT_OFFICIAL_GUIDE" | "CURRENT_POLICY" | "OFFICIAL_FAQ" | "VERIFIED_QNA" | "HISTORICAL_QNA";
+  sourceType?: "OFFICIAL_FAQ" | "OFFICIAL_QNA" | "CURRENT_OFFICIAL_INTRO" | "CURRENT_GUIDE" | "USER_MANUAL";
+  version?: string;
+  section?: string;
+  manualPageStart?: number;
+  manualPageEnd?: number;
+  pdfPageStart?: number;
+  pdfPageEnd?: number;
+  capabilityIds?: string[];
+  intents?: string[];
+  summary?: string;
+  cautions?: string[];
+  freshnessSensitive?: boolean;
+  procedureStable?: boolean;
+  authority?: "CURRENT_CANONICAL" | "CURRENT_OFFICIAL_INTRO" | "CURRENT_OFFICIAL_GUIDE" | "CURRENT_GUIDE" | "CURRENT_POLICY" | "USER_MANUAL_V4_2" | "OFFICIAL_FAQ" | "VERIFIED_QNA" | "HISTORICAL_QNA";
   status?: "CURRENT" | "REVIEW_REQUIRED" | "SUPERSEDED";
   reviewedAt?: string;
   supersededBy?: string;
@@ -20,6 +33,8 @@ export type SearchResult = { item: SearchableDocument; score: number };
 
 export type SearchOptions = {
   answerableOnly?: boolean;
+  preferredAuthority?: NonNullable<SearchableDocument["authority"]>;
+  excludeFreshnessSensitive?: boolean;
 };
 
 /** 최종 답변에 사용할 수 있는 현행 공식 문서인지 판정합니다. */
@@ -27,15 +42,17 @@ export function isAnswerableDocument(document: SearchableDocument) {
   return document.status === "CURRENT"
     && document.requiresReview !== true
     && document.alwaysEscalate !== true
-    && ["CURRENT_CANONICAL", "CURRENT_OFFICIAL_INTRO", "CURRENT_OFFICIAL_GUIDE", "CURRENT_POLICY", "OFFICIAL_FAQ", "VERIFIED_QNA"].includes(document.authority ?? "");
+    && ["CURRENT_CANONICAL", "CURRENT_OFFICIAL_INTRO", "CURRENT_OFFICIAL_GUIDE", "CURRENT_GUIDE", "CURRENT_POLICY", "USER_MANUAL_V4_2", "OFFICIAL_FAQ", "VERIFIED_QNA"].includes(document.authority ?? "");
 }
 
 export const authorityPrecedence: Record<NonNullable<SearchableDocument["authority"]>, number> = {
   HISTORICAL_QNA: 0,
   VERIFIED_QNA: 10,
   OFFICIAL_FAQ: 20,
+  USER_MANUAL_V4_2: 25,
   CURRENT_POLICY: 30,
   CURRENT_OFFICIAL_GUIDE: 40,
+  CURRENT_GUIDE: 40,
   CURRENT_OFFICIAL_INTRO: 40,
   CURRENT_CANONICAL: 50,
 };
@@ -95,6 +112,7 @@ export function searchFaq(query: string, limit = 3, documents: SearchableDocumen
 
   return documents
     .filter((item) => !answerableOnly || isAnswerableDocument(item))
+    .filter((item) => !options.excludeFreshnessSensitive || item.freshnessSensitive !== true)
     .map((item) => {
       const questionText = [item.question, item.title, ...(item.questions ?? [])].filter(Boolean).join(" ");
       const question = normalize(questionText);
@@ -120,6 +138,7 @@ export function searchFaq(query: string, limit = 3, documents: SearchableDocumen
       });
 
       if (score > 0) score += authorityPrecedence[item.authority ?? "HISTORICAL_QNA"] / 10;
+      if (score > 0 && options.preferredAuthority && item.authority === options.preferredAuthority) score += 18;
       if (item.status === "SUPERSEDED") score -= 100;
 
       return { item, score, directMatch };

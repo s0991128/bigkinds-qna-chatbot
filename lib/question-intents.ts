@@ -91,7 +91,7 @@ const simpleSearchStopWords = new Set([
   "찾고", "찾아", "찾아줘", "찾고싶어", "찾고싶어요", "싶어요", "싶어", "싶습니다", "보고", "보고싶어",
   "검색", "검색하고", "검색해", "해주세요", "해줘", "좀", "원해", "원해요", "들어가고", "들어가는",
   "들어간", "포함", "포함한", "포함하는", "포함된", "포함하고", "있는", "있고", "들어", "을", "를", "이", "가", "은", "는", "과", "와", "및", "이나", "나",
-  "중", "하나", "하나가", "둘", "하나면", "관련해", "넣어", "넣어줘", "넣어주세요", "추가", "추가해", "추가해줘", "추가해주세요", "꼭", "들어가야", "해", "돼", "되", "정확히",
+  "중", "하나", "하나가", "하나만", "둘", "하나면", "들어가면", "관련해", "넣어", "넣어줘", "넣어주세요", "추가", "추가해", "추가해줘", "추가해주세요", "꼭", "들어가야", "해", "돼", "되", "정확히",
   "포함해", "포함해줘", "포함해주세요", "같이", "함께", "빼줘", "제외해줘", "제외해", "없애줘", "언급되는지", "보고싶어",
   "검색결과", "검색결", "결과", "너무", "많이", "많아", "나오는데", "오는데", "어떻게", "줄여", "줄이고", "좁혀", "넓혀",
   "표현", "표현이", "이라는", "이라", "그거", "그것", "저거", "빼고", "말고", "찾아보고",
@@ -118,7 +118,8 @@ export function isSearchGoalQuestion(question: string): boolean {
   const hasNewsObject = /(?:기사|뉴스|보도)\b/i.test(question);
   const hasExplicitSearchGoal = /(?:기사|뉴스|보도).{0,28}(?:찾|검색|보고\s*싶)|(?:찾|검색|보고\s*싶).{0,28}(?:기사|뉴스|보도)/i.test(question);
   const hasNewMarker = /(?:이번에는|이번엔|이번|새로|다른\s*주제|이번\s*검색|새\s*검색)/i.test(question);
-  return (hasExplicitSearchGoal || (hasNewMarker && hasNewsObject)) && simpleSearchTerms(question).length > 0;
+  const hasConditionGoal = /(?:둘\s*중\s*하나|하나만\s*(?:들어가|포함)|중\s*하나)/i.test(question);
+  return (hasExplicitSearchGoal || (hasNewMarker && hasNewsObject) || hasConditionGoal) && simpleSearchTerms(question).length > 0;
 }
 
 export function extractSimpleSearchGoal(question: string): SearchQueryInput | null {
@@ -146,21 +147,27 @@ export function isServiceOverviewQuestion(question: string) {
 }
 
 export function isServiceGuideQuestion(question: string) {
+  if (/(?:관계도.*연관어|연관어.*관계도|관계도.*차이|연관어.*차이)/i.test(question)) return false;
+  if (/(?:내\s*)?엑셀\s*데이터.{0,16}(?:그래프|차트|시각화)|(?:그래프|차트|시각화).{0,16}(?:내\s*)?엑셀\s*데이터/i.test(question)) return false;
   const download = /다운로드|내려받|엑셀|excel|csv|파일|저장|받을\s*수/i.test(question);
   const usage = /검색\s*기간|언론사.{0,8}(?:선택|고르)|형태소\s*분석|개체명\s*분석|관계도\s*분석|연관어\s*분석|어떻게\s*(?:써|사용|이용|해)/i.test(question);
-  return download || usage;
+  const manualFeature = /키워드\s*트렌드|정보\s*추출|시각화|보고서|지역이슈|최신뉴스|주간\s*이슈|고신문|인용문|검색식.{0,12}저장|스크랩|나의\s*(?:뉴스|분석)/i.test(question);
+  const asksForLocationOrSteps = /(?:어디서|어디에|어디|방법|순서|사용|이용|눌러|할\s*수)/i.test(question);
+  return download || usage || (manualFeature && asksForLocationOrSteps);
 }
 
 export function isServiceFactQuestion(question: string) {
-  const scopeOrCount = /몇\s*년도부터|언제부터|몇\s*건|수록|보유|범위|언론사|1990년대|이전\s*뉴스|신문|고신문|지원하나요|가능한가요|할\s*수\s*있나요|되나요/i;
+  const scopeOrCount = /몇\s*년도부터|언제부터|몇\s*건|수록|보유|범위|언론사|1990년대|이전\s*뉴스|고신문|지원하나요|가능한가요|할\s*수\s*있나요|되나요/i;
   return /빅카인즈|뉴스|기사|검색|언론사|신문|고신문/.test(question) && scopeOrCount.test(question);
 }
 
 export function isFeatureRecommendationQuestion(question: string): boolean {
-  const relationshipSignal = /(?:같이|함께|서로|공동).{0,16}(?:언급|등장|나오|연결)|(?:언급|등장|나오).{0,16}(?:같이|함께|서로)|(?:인물|기업|기관).{0,8}(?:관계|관계도|연결)|관계가\s*(?:궁금|알고)|누구와\s*(?:같이|함께)\s*(?:등장|나오)/i;
+const relationshipSignal = /(?:같이|함께|서로|공동).{0,16}(?:언급|등장|나오|연결)|(?:언급|등장|나오).{0,16}(?:같이|함께|서로)|(?:인물|기업|기관).{0,8}(?:관계|관계도|연결)|관계가\s*(?:궁금|알고)|누구와\s*(?:같이|함께)\s*(?:등장|나오)/i;
 const relatedWordsSignal = /(?:연관어|연관\s*(?:된\s*)?키워드|관련\s*키워드|함께\s*나오는\s*단어|(?:많이|자주)\s*(?:나온|언급된)\s*단어)/i;
+  const manualCapabilitySignal = /키워드\s*트렌드|기사량|월별.{0,12}(?:변화|추이)|정보\s*추출|회사명.{0,12}(?:매출|추출|뽑)|매출액.{0,12}(?:추출|뽑)|사람\s*이름.{0,12}(?:기관|추출|뽑)|기관명.{0,12}(?:추출|뽑)|형태소|개체명|내\s*(?:엑셀|데이터).{0,16}(?:그래프|차트|시각화)|보고서.{0,12}(?:만들|저장|생성)|지역이슈|지역별.{0,20}(?:뉴스|지자체).{0,20}(?:분석|보고)|지자체\s*자료.{0,12}(?:분석|같이)|최신뉴스|주간\s*이슈|고신문|\d{4}년대\s*신문|인용문|검색식.{0,12}저장|스크랩|나의\s*(?:뉴스|분석)/i;
   const analysisSignal = /(?:분석|시각화|많이\s*(?:나오|언급)|자주\s*(?:나오|언급)|보고\s*싶)/i;
-  return (relationshipSignal.test(question) || relatedWordsSignal.test(question)) && analysisSignal.test(question);
+  return (relationshipSignal.test(question) || relatedWordsSignal.test(question) || manualCapabilitySignal.test(question))
+    && (analysisSignal.test(question) || manualCapabilitySignal.test(question));
 }
 
 export function isSearchExpressionDiagnosisQuestion(question: string): boolean {
@@ -187,7 +194,8 @@ function hasSelfContainedSearchGoal(question: string) {
   const hasNewsObject = /기사|뉴스|보도/i.test(question);
   const hasSearchVerb = /찾|검색|보고\s*싶|찾고\s*싶|찾아|검색하고|검색해/i.test(question);
   const hasNewMarker = /이번(?:에는|엔)?|새로|다른\s*주제|이번\s*검색|새\s*검색/i.test(question);
-  return simpleSearchTerms(question).length > 0 && ((hasNewsObject && hasSearchVerb) || hasNewMarker);
+  const hasConditionGoal = /(?:둘\s*중\s*하나|하나만\s*(?:들어가|포함)|중\s*하나)/i.test(question);
+  return simpleSearchTerms(question).length > 0 && ((hasNewsObject && hasSearchVerb) || hasNewMarker || hasConditionGoal);
 }
 
 function isAmbiguousSearchFollowup(question: string) {

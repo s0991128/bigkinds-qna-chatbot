@@ -31,6 +31,7 @@ await loadTypeScript("../lib/search-query-builder.ts");
 await loadTypeScript("../lib/search-context.ts");
 await loadTypeScript("../lib/diagnostic-flows.ts");
 await loadTypeScript("../lib/capabilities.ts");
+await loadTypeScript("../lib/article-lookup.ts");
 const diagnostics = await loadTypeScript("../lib/search-diagnostics.ts");
 await loadTypeScript("../lib/question-intents.ts");
 const context = await loadTypeScript("../lib/search-context.ts");
