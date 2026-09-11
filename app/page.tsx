@@ -24,10 +24,9 @@ import { applySearchTurn, createSearchContext, emptySearchContext, getSearchCont
 import type { SearchContext, SearchTurnResult } from "../lib/search-context";
 import { buildLookupStrategies, type LookupStrategy } from "../lib/article-lookup-strategy";
 import { createArticleLookupHistorySummary, createLookupReplyDraft, emptyArticleLookupContext, extractArticleLookupCase, isHistoricalArticleLookupQuestion, sanitizeLookupRequestForHistory, updateArticleLookupCase, type ArticleLookupCase, type ArticleLookupContext, type ArticleLookupResultStatus } from "../lib/article-lookup";
-import { createSupportCase, summarizeSupportCase, type SupportCase } from "../lib/support-case";
+import { createSupportCase, summarizeSupportCase, summarizeSupportRequest, type SupportCase, type SupportIssueKind } from "../lib/support-case";
 import { detectSupportIssues, supportIssueLabel } from "../lib/support-routing";
 import { getPolicyHandoff, type PolicyHandoff } from "../lib/policy-safety";
-import { sanitizeSupportText } from "../lib/privacy-sanitizer";
 
 declare global {
   interface Window {
@@ -130,6 +129,16 @@ const materialTypeLabels: Record<ArticleLookupCase["materialType"], string> = {
   UNKNOWN: "미확인",
 };
 
+const supportIssueInsightEvents: Partial<Record<SupportIssueKind, "SEARCH_FILTER_PROBLEM" | "MEMBERSHIP_EMAIL_PROBLEM" | "AUDIO_PLAYBACK_PROBLEM" | "RIGHTS_LICENSE_INQUIRY" | "RIGHTS_RESEARCH_INQUIRY">> = {
+  SEARCH_FILTER_PROBLEM: "SEARCH_FILTER_PROBLEM",
+  MEMBERSHIP_EMAIL_PROBLEM: "MEMBERSHIP_EMAIL_PROBLEM",
+  AUDIO_PLAYBACK_PROBLEM: "AUDIO_PLAYBACK_PROBLEM",
+  RIGHTS_LICENSE: "RIGHTS_LICENSE_INQUIRY",
+  RIGHTS_RESEARCH: "RIGHTS_RESEARCH_INQUIRY",
+};
+
+const SUPPORT_QNA_URL = QNA_SOURCE_URL;
+
 function loadScript(path: string) {
   return new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
@@ -186,11 +195,11 @@ function toPersistedMessage(message: Message): PersistedChatMessage {
   return {
     id: message.id,
     role: message.role,
-    text: message.articleLookupRequest ? sanitizeLookupRequestForHistory(message.text) : message.supportRequest ? sanitizeSupportText(message.text) : message.text,
+    text: message.articleLookupRequest ? sanitizeLookupRequestForHistory(message.text) : message.supportRequest ? summarizeSupportRequest(message.text, message.supportCase?.issues || detectSupportIssues(message.text)) : message.text,
     matchedId: message.matchedId,
     relatedIds: message.relatedIds,
     isFallback: message.isFallback,
-    question: message.articleLookupRequest && message.question ? sanitizeLookupRequestForHistory(message.question) : message.supportRequest && message.question ? sanitizeSupportText(message.question) : message.question,
+    question: message.articleLookupRequest && message.question ? sanitizeLookupRequestForHistory(message.question) : message.supportRequest && message.question ? summarizeSupportRequest(message.question, message.supportCase?.issues || detectSupportIssues(message.question)) : message.question,
     apiRedirect: message.apiRedirect,
     searchQuery: message.searchQuery ? { value: message.searchQuery.value, description: message.searchQuery.description } : undefined,
     searchInput: message.searchQuery?.input,
@@ -200,7 +209,16 @@ function toPersistedMessage(message: Message): PersistedChatMessage {
     actions: message.actions,
     answerModel: message.answerModel,
     diagnostic: message.diagnostic,
-    supportCaseSummary: summarizeSupportCase(message.supportCase || null) || undefined,
+    supportCaseSummary: summarizeSupportCase(message.supportCase || (message.supportRequest ? {
+      caseId: "support-history",
+      sanitizedQuestion: "",
+      summary: summarizeSupportRequest(message.text, detectSupportIssues(message.text)),
+      issues: detectSupportIssues(message.text),
+      primaryIssue: detectSupportIssues(message.text)[0] || null,
+      status: "OPEN",
+      createdAt: "",
+      updatedAt: "",
+    } : null)) || undefined,
     searchDiagnosis: message.searchDiagnosis,
     manualReference: message.manualReference,
     articleLookupSummary: createArticleLookupHistorySummary(message.articleLookupCase || null),
@@ -228,7 +246,16 @@ function fromPersistedMessage(message: PersistedChatMessage): Message {
     actions: message.actions,
     answerModel: message.answerModel,
     diagnostic: message.diagnostic,
-    supportCase: message.supportCase ? { ...message.supportCase, sanitizedQuestion: sanitizeSupportText(message.supportCase.sanitizedQuestion) } : undefined,
+    supportCase: message.supportCaseSummary ? {
+      caseId: "support-restored",
+      sanitizedQuestion: message.supportCaseSummary.summary,
+      summary: message.supportCaseSummary.summary,
+      issues: message.supportCaseSummary.issues,
+      primaryIssue: message.supportCaseSummary.primaryIssue,
+      status: message.supportCaseSummary.status,
+      createdAt: "",
+      updatedAt: "",
+    } : undefined,
     searchDiagnosis: message.searchDiagnosis,
     manualReference: message.manualReference,
     lookupResultStatus: message.lookupResultStatus,
@@ -384,7 +411,7 @@ export default function Home() {
     const firstUser = currentMessages.find((message) => message.role === "user");
     sessionRef.current.id = sessionIdRef.current;
     sessionRef.current.messages = currentMessages.map(toPersistedMessage);
-    sessionRef.current.title = firstUser?.text ? (firstUser.articleLookupRequest ? sanitizeLookupRequestForHistory(firstUser.text) : firstUser.supportRequest ? sanitizeSupportText(firstUser.text) : firstUser.text).slice(0, 80) : sessionRef.current.title;
+    sessionRef.current.title = firstUser?.text ? (firstUser.articleLookupRequest ? sanitizeLookupRequestForHistory(firstUser.text) : firstUser.supportRequest ? summarizeSupportRequest(firstUser.text, detectSupportIssues(firstUser.text)) : firstUser.text).slice(0, 80) : sessionRef.current.title;
     sessionRef.current.updatedAt = new Date().toISOString();
     delete sessionRef.current.closedAt;
     sessionRef.current.workingState = {
@@ -542,9 +569,13 @@ export default function Home() {
   }
 
   async function requestAi(question: string, task: AiTask = "ROUTE", stateOverride?: Partial<SearchWorkingState>) : Promise<AiRouterResponse> {
+    if (aiStateRef.current.activeMode === "ARTICLE_LOOKUP" || aiStateRef.current.articleLookupContext.currentCase) {
+      return { available: false, reason: "SENSITIVE" };
+    }
     const state = stateOverride || (task === "INTERPRET_SEARCH_GOAL" || task === "CLASSIFY_SEARCH_TURN"
       ? { activeMode: aiStateRef.current.activeMode }
       : aiStateRef.current);
+    const requestState = Object.fromEntries(Object.entries(state).filter(([key]) => key !== "articleLookupContext"));
     try {
       const response = await fetch("/api/ai", {
         method: "POST",
@@ -553,7 +584,7 @@ export default function Home() {
           question,
           task,
           pageType: pageContext.pageType,
-          state: { ...state, pageType: pageContext.pageType },
+          state: { ...requestState, pageType: pageContext.pageType },
         }),
       });
       return await response.json() as AiRouterResponse;
@@ -905,6 +936,11 @@ export default function Home() {
       setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "일반 기사 형태가 아니라 지면의 별도 명단·박스 자료일 가능성이 있습니다. BIGKinds는 협약 언론사로부터 제공받은 기사 데이터를 기반으로 하므로, 정확한 원지면 확인이 필요하면 해당 언론사에 해당 일자·지면의 열람 가능 여부를 문의할 수 있습니다.", intent: "HISTORICAL_ARTICLE_LOOKUP" }]);
     }
     else if (action.type === "COPY_QUERY" && action.value) void copyText(action.value);
+    else if (action.type === "COPY_SUPPORT_REQUEST" && action.value) void copyText(action.value);
+    else if (action.type === "SUPPORT_ESCALATE" && action.url) {
+      recordInsight({ eventType: "SUPPORT_ESCALATED", pageType: pageContext.pageType });
+      emitHostAction({ type: "OPEN_URL", label: action.label, url: action.url });
+    }
     else if (action.type === "OPEN_URL" && action.url) emitHostAction({ type: "OPEN_URL", label: action.label, url: action.url });
     else if (action.type === "SHOW_GUIDE" && action.value) ask(action.value);
     else if (action.type === "OPEN_QNA") emitHostAction({ type: "OPEN_QNA", label: action.label, url: QNA_SOURCE_URL });
@@ -1030,10 +1066,49 @@ export default function Home() {
     }]);
   }
 
+  function recordSupportCaseInsights(issues: SupportIssueKind[]) {
+    recordInsight({ eventType: "SUPPORT_CASE_STARTED", pageType: pageContext.pageType });
+    if (issues.length > 1) recordInsight({ eventType: "MULTI_ISSUE_SUPPORT", pageType: pageContext.pageType });
+    issues.forEach((issue) => {
+      const eventType = supportIssueInsightEvents[issue];
+      if (eventType) recordInsight({ eventType, pageType: pageContext.pageType });
+    });
+  }
+
+  function getSupportDocument(issue: SupportIssueKind) {
+    return knowledge.find((document) => document.answerMode === "USER_FACING" && document.issueKinds?.includes(issue));
+  }
+
+  function supportInquiryText(supportCase: SupportCase, issue: SupportIssueKind) {
+    return `문의 유형: ${supportIssueLabel(issue)}\n문의 요약: ${supportCase.summary}`;
+  }
+
+  function supportIssueActions(supportCase: SupportCase, issue: SupportIssueKind, flow: DiagnosticFlow | undefined): PersistedMessageAction[] {
+    const inquiryText = supportInquiryText(supportCase, issue);
+    if (issue === "RIGHTS_LICENSE" || issue === "RIGHTS_RESEARCH") {
+      return [
+        {
+          id: `support-escalate-${issue}`,
+          label: issue === "RIGHTS_LICENSE" ? "공식 문의하기" : "이용범위 문의",
+          type: "SUPPORT_ESCALATE",
+          url: SUPPORT_QNA_URL,
+        },
+        { id: `support-copy-${issue}`, label: "문의내용 복사", type: "COPY_SUPPORT_REQUEST", value: inquiryText },
+      ];
+    }
+    return [
+      { id: `support-guide-${issue}`, label: "문제 해결", type: "SHOW_GUIDE", value: flow?.options[0]?.question || "문제 해결 방법을 알려줘" },
+      { id: `support-qna-${issue}`, label: "Q&A 문의", type: "SUPPORT_ESCALATE", url: SUPPORT_QNA_URL },
+    ];
+  }
+
   function showPolicyHandoff(question: string, handoff: PolicyHandoff) {
+    const supportIssues = detectSupportIssues(question);
+    const supportCase = createSupportCase(question, supportIssues);
     const text = `${handoff.label} 관련 문의는 이용 조건·계약·저작권 판단이 필요해 챗봇이 허용 여부, 금액, 계약 기간을 추정하거나 단정하지 않습니다.\n\n${handoff.guidance}`;
     updateWorkingState({ lastIntent: "SUPPORT_TRIAGE" });
     recordInsight({ eventType: "SUPPORT_TRIAGE_USED", pageType: pageContext.pageType });
+    if (supportIssues.length) recordSupportCaseInsights(supportIssues);
     setMessages((current) => [...current, {
       id: nextId.current++,
       role: "assistant",
@@ -1041,8 +1116,10 @@ export default function Home() {
       intent: "SUPPORT_TRIAGE",
       question,
       supportRequest: true,
+      supportCase: supportIssues.length ? supportCase : undefined,
+      supportDiagnostics: supportIssues.map((issue) => getDiagnosticFlow(issue)),
       policyHandoff: true,
-      actions: [{ id: "policy-official-contact", label: "공식 안내 확인", type: "OPEN_URL", url: handoff.url }],
+      actions: [{ id: "policy-official-contact", label: "공식 안내 확인", type: "SUPPORT_ESCALATE", url: handoff.url }],
     }]);
   }
 
@@ -1133,6 +1210,7 @@ export default function Home() {
       if (routed.intent === "SUPPORT_TRIAGE") {
         const supportCase = createSupportCase(cleanQuestion, routed.supportIssues || []);
         const supportDiagnostics = supportCase.issues.map((issue) => getDiagnosticFlow(issue));
+        recordSupportCaseInsights(supportCase.issues);
         setMessages((current) => [...current, {
           id: nextId.current++, role: "assistant",
           text: supportCase.issues.length > 1
@@ -1851,7 +1929,27 @@ export default function Home() {
                       </div>
                     )}
                     {message.searchDiagnosis && <div className="search-diagnosis"><strong>검색식 진단</strong><span>입력한 검색식</span><code>{message.searchDiagnosis.input}</code><span>권장 검색식</span><code>{message.searchDiagnosis.suggestion}</code><p>{message.searchDiagnosis.message}</p>{message.manualReference && <small className="authority-badge">{message.manualReference.label} 검색하기 {message.manualReference.section} 기준</small>}<div><button type="button" onClick={() => copyText(message.searchDiagnosis?.suggestion || "")}>수정 검색식 복사</button><button type="button" onClick={() => handleMessageAction({ id: "apply-diagnosis-inline", label: "수정 검색식 사용", type: "APPLY_SEARCH_DIAGNOSIS", value: message.searchDiagnosis?.suggestion })}>수정 검색식 사용</button></div></div>}
-                    {message.supportCase && <div className="support-case-card"><strong>문의 유형</strong><div>{message.supportCase.issues.map((issue) => <span key={issue}>{supportIssueLabel(issue)}</span>)}</div><small>질문 원문과 개인정보는 문의 기록에 저장하지 않습니다.</small></div>}
+                    {message.supportCase && <div className="support-case-card">
+                      <strong>{message.supportCase.issues.length > 1 ? "두 가지 문제가 함께 있는 것으로 보입니다." : "문의 내용을 이렇게 확인했습니다."}</strong>
+                      <div className="support-issue-list">
+                        {message.supportCase.issues.map((issue) => {
+                          const document = getSupportDocument(issue);
+                          const flow = message.supportDiagnostics?.find((candidate) => candidate.kind === issue);
+                          const steps = document?.steps?.length ? document.steps : flow?.options.slice(0, 3).map((option) => option.label) || [];
+                          return <article className="support-issue-card" key={issue}>
+                            <h4>{supportIssueLabel(issue)}</h4>
+                            <span className="support-card-label">확인된 공식 안내</span>
+                            <p>{document?.summary || document?.answer || flow?.title || "공식 Q&A에서 현재 상황을 확인해 주세요."}</p>
+                            {steps.length > 0 && <><span className="support-card-label">단계</span><ol>{steps.map((step) => <li key={step}>{step}</li>)}</ol></>}
+                            <span className="support-card-label">출처</span>
+                            <a className="support-source" href={document?.source?.url || SUPPORT_QNA_URL} target="_blank" rel="noreferrer">{document?.source?.label || "빅카인즈 공식 Q&A"} ↗</a>
+                            <span className="support-card-label">다음 행동</span>
+                            <div className="support-next-actions">{supportIssueActions(message.supportCase, issue, flow).map((action) => <button type="button" key={action.id} onClick={() => handleMessageAction(action)}>{action.label}</button>)}</div>
+                          </article>;
+                        })}
+                      </div>
+                      <small>문의 원문과 개인정보는 기록에 저장하지 않고 이슈 요약만 보관합니다.</small>
+                    </div>}
                     {message.supportDiagnostics?.map((flow) => <div className="diagnostic-flow" key={flow.kind}><strong>{flow.title}</strong><div>{flow.options.map((option) => <button type="button" key={option.label} onClick={() => ask(option.question)}>{option.label}</button>)}</div></div>)}
                     {message.capabilities && <div className="capability-answer"><strong>추천 기능</strong>{message.capabilities.map((capability) => {
                       const source = capability.sourceIds.map((id) => knowledge.find((item) => item.id === id)).find(Boolean);

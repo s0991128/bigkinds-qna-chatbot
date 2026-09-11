@@ -31,6 +31,7 @@ test("support case preserves multiple issue kinds and only stores a sanitized qu
   const record = supportCase.createSupportCase(question, ["SEARCH_NO_RESULT", "DOWNLOAD_PROBLEM"], "2026-09-11T00:00:00.000Z");
   assert.deepEqual(record.issues, ["SEARCH_NO_RESULT", "DOWNLOAD_PROBLEM"]);
   assert.equal(record.primaryIssue, "SEARCH_NO_RESULT");
+  assert.equal(record.summary, "검색결과 없음, 다운로드 문제 문의");
   assert.doesNotMatch(record.sanitizedQuestion, /qa@example\.invalid/);
   assert.equal(supportCase.summarizeSupportCase(record).issues.length, 2);
 });
@@ -39,4 +40,5 @@ test("empty support case requests more details without inventing an issue", () =
   const record = supportCase.createSupportCase("빅카인즈 이용 문의", [], "2026-09-11T00:00:00.000Z");
   assert.equal(record.status, "NEEDS_DETAILS");
   assert.equal(record.primaryIssue, null);
+  assert.equal(record.summary, "빅카인즈 이용 문의");
 });

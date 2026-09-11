@@ -49,6 +49,27 @@ test("동일 session id는 archive를 여러 번 해도 하나로 upsert된다",
   assert.equal(sessions[0].messages.length, 2);
 });
 
+test("archive는 Article Lookup 인물명과 검색 전략을 History에 보관하지 않는다", () => {
+  const storage = new MemoryStorage();
+  const active = session.createChatSession();
+  active.messages = [
+    userMessage(1, "[인물명 비공개] 교수의 기사 찾기"),
+    {
+      id: 2,
+      role: "assistant",
+      text: "검색 전략",
+      articleLookupSummary: { period: { originalText: "1997년", precision: "APPROXIMATE" }, media: ["매일경제"], organizations: [], events: [], materialType: "ARTICLE", pageHints: [], status: "READY" },
+      lookupStrategies: [{ id: "lookup-direct", title: "직접", description: "", searchInput: { all: ["홍길동"], any: [], exact: [], exclude: [] }, query: "홍길동" }],
+    },
+  ];
+  active.workingState.articleLookupContext = { currentCase: { id: "lookup-1", period: { originalText: "1997년", precision: "APPROXIMATE" }, media: [], persons: ["홍길동"], organizations: [], roles: [], events: [], awards: [], keywords: ["홍길동"], pageHints: [], materialType: "ARTICLE", status: "READY", createdAt: "", updatedAt: "" }, selectedStrategyId: "lookup-direct", lastResultStatus: null };
+  session.archiveChatSession(active, storage);
+  const archived = session.loadChatSessions(storage)[0];
+  assert.equal(archived.messages[1].lookupStrategies, undefined);
+  assert.equal(archived.workingState.articleLookupContext.currentCase, null);
+  assert.doesNotMatch(JSON.stringify(archived), /홍길동/);
+});
+
 test("welcome-only session은 archive하지 않고 새 session은 id가 달라진다", () => {
   const storage = new MemoryStorage();
   const welcome = session.createChatSession();

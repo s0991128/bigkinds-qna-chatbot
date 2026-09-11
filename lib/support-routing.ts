@@ -1,7 +1,7 @@
 import { SUPPORT_ISSUE_KINDS, SupportIssueKind } from "./support-case";
 
 const problemCue = /안\s*(?:돼|되|나와|보여|열려|됨)|않|오류|에러|실패|문제|이상|막혀|작동|반응|못\s*(?:찾|받|로그인|재생)|0\s*건|없어|안\s*옴|안\s*와|끊겨|멈춰/i;
-const rightsCue = /저작권|이용권|라이선스|라이센스|사용권|복제|배포|상업적\s*이용|원문\s*(?:이용|제공|다운로드)/i;
+const rightsCue = /저작권|이용권|라이선스|라이센스|사용권|복제|배포|상업적\s*이용|원문\s*(?:을|이|은|의)?\s*(?:이용|제공|다운로드)|(?:AI|인공지능)\s*(?:학습|재이용|재사용|가공|배포)/i;
 const researchCue = /연구\s*(?:목적|용|에\s*사용)|논문|학술|인용|출처\s*(?:표기|기재)|연구자|연구\s*자료/i;
 
 const detectors: Array<[SupportIssueKind, RegExp, boolean]> = [

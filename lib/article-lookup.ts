@@ -95,7 +95,11 @@ export function sanitizeLookupRequest(value: string) {
   return value.replace(mailHeaderPattern, "").replace(contactPattern, "[개인정보 제거]").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-export const sanitizeLookupRequestForHistory = sanitizeLookupRequest;
+export function sanitizeLookupRequestForHistory(value: string) {
+  const sanitized = sanitizeLookupRequest(value);
+  const persons = extractPersons(sanitized);
+  return persons.reduce((result, person) => result.split(person).join("[인물명 비공개]"), sanitized);
+}
 
 function extractLabeledValues(value: string, label: string) {
   return [...value.matchAll(new RegExp(`(?:${label})\\s*[:：]\\s*([가-힣A-Za-z0-9·()]{2,30})`, "g"))].map((match) => match[1]);
@@ -103,7 +107,7 @@ function extractLabeledValues(value: string, label: string) {
 
 function extractPersons(value: string) {
   const labelled = extractLabeledValues(value, "성명|이름|인물");
-  const titled = [...value.matchAll(/\b([가-힣]{2,4})\s*(?:교수|씨)\b/g)].map((match) => match[1]);
+  const titled = [...value.matchAll(/(?:^|[^가-힣])([가-힣]{2,4})\s*(?:교수|씨)(?:님)?(?:의|이|가|은|는|을|를|도)?(?![가-힣])/g)].map((match) => match[1]);
   return unique([...labelled, ...titled]);
 }
 

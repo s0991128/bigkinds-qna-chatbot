@@ -21,6 +21,7 @@ export type SearchableDocument = FaqItem & {
   intents?: string[];
   summary?: string;
   cautions?: string[];
+  issueKinds?: string[];
   freshnessSensitive?: boolean;
   procedureStable?: boolean;
   authority?: "CURRENT_CANONICAL" | "CURRENT_OFFICIAL_INTRO" | "CURRENT_OFFICIAL_GUIDE" | "CURRENT_GUIDE" | "CURRENT_POLICY" | "USER_MANUAL" | "USER_MANUAL_V4_2" | "OFFICIAL_FAQ" | "VERIFIED_QNA" | "HISTORICAL_QNA";

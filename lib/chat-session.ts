@@ -197,11 +197,21 @@ export function archiveChatSession(session: ChatSession, storage?: Storage): Cha
   if (!session.messages.some((message) => message.role === "user")) return loadChatSessions(storage);
   const now = new Date().toISOString();
   const firstUserMessage = session.messages.find((message) => message.role === "user");
+  const archivedMessages = session.messages.map((message) => message.articleLookupSummary
+    ? { ...message, lookupStrategies: undefined }
+    : message);
   const archived = {
     ...session,
+    messages: archivedMessages,
     title: firstUserMessage ? truncateSessionTitle(firstUserMessage.text) : session.title,
     updatedAt: now,
     closedAt: now,
+    workingState: {
+      ...session.workingState,
+      articleLookupContext: session.workingState.articleLookupContext
+        ? { ...session.workingState.articleLookupContext, currentCase: null, selectedStrategyId: null }
+        : undefined,
+    },
   };
   const sessions = [archived, ...loadChatSessions(storage).filter((item) => item.id !== session.id)].slice(0, 100);
   const target = storageOrDefault(storage, "local");
