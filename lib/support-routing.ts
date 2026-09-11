@@ -6,7 +6,7 @@ const researchCue = /(?:비영리\s*)?연구\s*(?:목적|용|에\s*사용|에서
 
 const detectors: Array<[SupportIssueKind, RegExp, boolean]> = [
   ["SEARCH_NO_RESULT", /검색결과|검색\s*결과|검색어|뉴스\s*검색/i, true],
-  ["SEARCH_FILTER_PROBLEM", /필터|검색\s*조건|검색기간|기간\s*(?:설정|필터|선택)|언론사\s*(?:선택|필터)|정렬|조건/i, true],
+  ["SEARCH_FILTER_PROBLEM", /필터|검색\s*조건|검색기간|기간\s*(?:은|는|이|가|도)?\s*(?:설정|필터|선택)|언론사\s*(?:선택|필터)|정렬|조건/i, true],
   ["DOWNLOAD_PROBLEM", /다운로드|내려받|엑셀|excel|csv|파일s*(?:받|저장|열)/i, true],
   ["AUDIO_PLAYBACK_PROBLEM", /오디오|음성|듣기|재생|소리|낭독/i, true],
   ["MEMBERSHIP_EMAIL_PROBLEM", /회원가입|가입\s*(?:메일|이메일)|인증\s*메일|인증메일|이메일.{0,12}(?:변경|인증|수신|가입|다시)|가입.{0,12}이메일|메일\s*(?:안|못|오류|수신)|로그인\s*메일/i, true],

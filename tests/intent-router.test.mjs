@@ -86,6 +86,12 @@ test("새 검색과 기능·진단·다운로드 요청의 경계를 지킨다",
   assert.equal(router.routeUserIntent("손흥민 오늘 골 넣었어?", routeContext(true)).intent, "OUT_OF_SCOPE");
 });
 
+test("검색식 만들기 문장의 지시어를 검색어로 포함하지 않는다", () => {
+  const expression = intents.detectSearchExpressionIntent("인공지능과 반도체를 모두 포함한 검색식을 만들어줘");
+  assert.equal(expression?.query, "인공지능 AND 반도체");
+  assert.equal(expression?.query.includes("모두"), false);
+});
+
 test("Q1-Q10은 서비스 우선 라우팅과 PROPOSED 검색 컨텍스트를 지킨다", () => {
   const initialContext = context.emptySearchContext();
   const now = new Date().toISOString();

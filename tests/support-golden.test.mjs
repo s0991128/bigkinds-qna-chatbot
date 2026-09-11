@@ -50,6 +50,7 @@ const goldenCases = [
   ["이메일 변경 인증 문제", "이메일 변경 인증이 안 돼요", ["MEMBERSHIP_EMAIL_PROBLEM", "ACCOUNT_PROBLEM"]],
   ["오디오 끊김 문제", "기사 소리가 끊겨서 오디오를 못 들어요", ["AUDIO_PLAYBACK_PROBLEM"]],
   ["검색기간 선택 불가", "검색결과가 0건이고 검색기간도 선택할 수 없어요.", ["SEARCH_NO_RESULT", "SEARCH_FILTER_PROBLEM"]],
+  ["기간 선택 불가", "검색결과가 0건이고 기간도 선택할 수 없어요.", ["SEARCH_NO_RESULT", "SEARCH_FILTER_PROBLEM"]],
   ["검색결과와 다른 이메일 가입 문의", "검색결과가 안 나오는데 다른 이메일로 다시 가입하면 되나요?", ["SEARCH_NO_RESULT", "MEMBERSHIP_EMAIL_PROBLEM", "ACCOUNT_PROBLEM"]],
   ["가입 이메일 오입력", "가입할 때 이메일을 잘못 적어서 인증메일을 못 받고 있어요.", ["MEMBERSHIP_EMAIL_PROBLEM", "ACCOUNT_PROBLEM"]],
   ["유료 회원 AI 요약 제공", "유료 회원에게 기사 제목과 AI 요약을 제공해도 되나요?", ["RIGHTS_LICENSE"]],
