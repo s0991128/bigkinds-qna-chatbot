@@ -33,6 +33,9 @@ test("policy questions are classified without estimating permission or price", (
     "API 요금과 계약 기간을 알려줘",
     "AI 학습에 재이용해도 되나요?",
     "연구 목적 라이선스를 받을 수 있나요?",
+    "유료 회원에게 기사 제목과 AI 요약을 제공해도 되나요?",
+    "다운로드한 기사를 비영리 연구에서 로컬 Python으로 분석해도 되나요?",
+    "AI로 뉴스를 요약해서 유료 회원에게 제공해도 되나요?",
   ]) {
     const handoff = policySafety.getPolicyHandoff(question);
     assert.ok(handoff, question);
