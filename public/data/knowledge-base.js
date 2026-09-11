@@ -278,6 +278,12 @@ window.BIGKINDS_KNOWLEDGE_BASE = {
   const importedQna = Array.isArray(window.BIGKINDS_IMPORTED_QNA)
     ? window.BIGKINDS_IMPORTED_QNA
     : [];
+  const supportManual = Array.isArray(window.BIGKINDS_SUPPORT_MANUAL)
+    ? window.BIGKINDS_SUPPORT_MANUAL
+    : [];
+  const openapiReference = Array.isArray(window.BIGKINDS_OPENAPI_REFERENCE)
+    ? window.BIGKINDS_OPENAPI_REFERENCE
+    : [];
 
   const makeKeywords = (text) =>
     Array.from(
@@ -300,7 +306,7 @@ window.BIGKINDS_KNOWLEDGE_BASE = {
   }));
 
   const existingIds = new Set(kb.documents.map((document) => document.id));
-  for (const document of [...verifiedPolicy, ...faqDocuments, ...importedQna]) {
+  for (const document of [...verifiedPolicy, ...faqDocuments, ...importedQna, ...supportManual, ...openapiReference]) {
     if (!existingIds.has(document.id)) {
       kb.documents.push(document);
       existingIds.add(document.id);

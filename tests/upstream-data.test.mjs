@@ -9,6 +9,8 @@ for (const file of [
   "../public/data/verified-policy.js",
   "../public/data/qna-import.js",
   ...Array.from({ length: 21 }, (_, index) => `../public/data/qna-data-${String(index + 1).padStart(2, "0")}.js`),
+  "../public/data/support-manual.js",
+  "../public/data/openapi-reference.js",
   "../public/data/knowledge-base.js",
   "../public/data/official-intro.js",
   "../public/data/manual-knowledge.js",

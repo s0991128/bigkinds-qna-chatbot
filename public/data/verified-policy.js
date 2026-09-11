@@ -164,3 +164,23 @@ window.BIGKINDS_VERIFIED_POLICY = [
   }
 ];
 
+(function applyPolicySafetyModes() {
+  const handoffIds = new Set([
+    "api-purchase-official",
+    "api-operational-limits",
+    "api-data-use-boundaries",
+    "academic-research-data"
+  ]);
+  window.BIGKINDS_VERIFIED_POLICY = window.BIGKINDS_VERIFIED_POLICY.map((document) => {
+    const handoffOnly = handoffIds.has(document.id)
+      || document.alwaysEscalate === true
+      || document.requiresReview === true;
+    return {
+      ...document,
+      requiresReview: handoffOnly ? true : Boolean(document.requiresReview),
+      alwaysEscalate: handoffOnly ? true : Boolean(document.alwaysEscalate),
+      answerMode: handoffOnly ? "HANDOFF_ONLY" : "USER_FACING"
+    };
+  });
+})();
+

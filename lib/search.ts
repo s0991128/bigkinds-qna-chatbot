@@ -10,7 +10,7 @@ export type SearchableDocument = FaqItem & {
   source?: { label?: string; url?: string; pages?: string; document?: string };
   facts?: string[];
   steps?: string[];
-  sourceType?: "OFFICIAL_FAQ" | "OFFICIAL_QNA" | "CURRENT_OFFICIAL_INTRO" | "CURRENT_GUIDE" | "USER_MANUAL";
+  sourceType?: "OFFICIAL_FAQ" | "OFFICIAL_QNA" | "CURRENT_OFFICIAL_INTRO" | "CURRENT_GUIDE" | "USER_MANUAL" | "OPENAPI_REFERENCE";
   version?: string;
   section?: string;
   manualPageStart?: number;
@@ -23,7 +23,8 @@ export type SearchableDocument = FaqItem & {
   cautions?: string[];
   freshnessSensitive?: boolean;
   procedureStable?: boolean;
-  authority?: "CURRENT_CANONICAL" | "CURRENT_OFFICIAL_INTRO" | "CURRENT_OFFICIAL_GUIDE" | "CURRENT_GUIDE" | "CURRENT_POLICY" | "USER_MANUAL_V4_2" | "OFFICIAL_FAQ" | "VERIFIED_QNA" | "HISTORICAL_QNA";
+  authority?: "CURRENT_CANONICAL" | "CURRENT_OFFICIAL_INTRO" | "CURRENT_OFFICIAL_GUIDE" | "CURRENT_GUIDE" | "CURRENT_POLICY" | "USER_MANUAL" | "USER_MANUAL_V4_2" | "OFFICIAL_FAQ" | "VERIFIED_QNA" | "HISTORICAL_QNA";
+  answerMode?: "USER_FACING" | "HANDOFF_ONLY" | "INTERNAL_REFERENCE";
   status?: "CURRENT" | "REVIEW_REQUIRED" | "SUPERSEDED";
   reviewedAt?: string;
   supersededBy?: string;
@@ -42,6 +43,8 @@ export function isAnswerableDocument(document: SearchableDocument) {
   return document.status === "CURRENT"
     && document.requiresReview !== true
     && document.alwaysEscalate !== true
+    && document.answerMode !== "HANDOFF_ONLY"
+    && document.answerMode !== "INTERNAL_REFERENCE"
     && ["CURRENT_CANONICAL", "CURRENT_OFFICIAL_INTRO", "CURRENT_OFFICIAL_GUIDE", "CURRENT_GUIDE", "CURRENT_POLICY", "USER_MANUAL_V4_2", "OFFICIAL_FAQ", "VERIFIED_QNA"].includes(document.authority ?? "");
 }
 
@@ -50,6 +53,7 @@ export const authorityPrecedence: Record<NonNullable<SearchableDocument["authori
   VERIFIED_QNA: 10,
   OFFICIAL_FAQ: 20,
   USER_MANUAL_V4_2: 25,
+  USER_MANUAL: 25,
   CURRENT_POLICY: 30,
   CURRENT_OFFICIAL_GUIDE: 40,
   CURRENT_GUIDE: 40,

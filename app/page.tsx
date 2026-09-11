@@ -24,8 +24,9 @@ import { applySearchTurn, createSearchContext, emptySearchContext, getSearchCont
 import type { SearchContext, SearchTurnResult } from "../lib/search-context";
 import { buildLookupStrategies, type LookupStrategy } from "../lib/article-lookup-strategy";
 import { createArticleLookupHistorySummary, createLookupReplyDraft, emptyArticleLookupContext, extractArticleLookupCase, isHistoricalArticleLookupQuestion, sanitizeLookupRequestForHistory, updateArticleLookupCase, type ArticleLookupCase, type ArticleLookupContext, type ArticleLookupResultStatus } from "../lib/article-lookup";
-import { createSupportCase, summarizeSupportCase, type SupportCase, type SupportIssueKind } from "../lib/support-case";
+import { createSupportCase, summarizeSupportCase, type SupportCase } from "../lib/support-case";
 import { detectSupportIssues, supportIssueLabel } from "../lib/support-routing";
+import { getPolicyHandoff, type PolicyHandoff } from "../lib/policy-safety";
 import { sanitizeSupportText } from "../lib/privacy-sanitizer";
 
 declare global {
@@ -63,6 +64,7 @@ type Message = {
   replyDraft?: string;
   articleLookupRequest?: boolean;
   supportRequest?: boolean;
+  policyHandoff?: boolean;
   suggestedTerms?: AiSuggestedTerms[];
 };
 
@@ -110,6 +112,8 @@ const dataScriptPaths = [
   "/data/verified-policy.js",
   "/data/qna-import.js",
   ...Array.from({ length: 21 }, (_, index) => `/data/qna-data-${String(index + 1).padStart(2, "0")}.js`),
+  "/data/support-manual.js",
+  "/data/openapi-reference.js",
   "/data/knowledge-base.js",
   "/data/official-intro.js",
   "/data/manual-knowledge.js",
@@ -149,6 +153,7 @@ function normalizeKnowledgeDocument(document: SearchableDocument): SearchableDoc
     category: document.category || "기타",
     keywords: document.keywords || [],
     answer: document.answer || "공식 답변을 확인해 주세요.",
+    answerMode: document.answerMode ?? (document.requiresReview === true || document.alwaysEscalate === true ? "HANDOFF_ONLY" : "USER_FACING"),
     authority,
     status,
   };
@@ -781,7 +786,7 @@ export default function Home() {
     }]);
   }
 
-  function useLookupStrategy(strategyId: string) {
+  function applyLookupStrategy(strategyId: string) {
     const articleLookupCase = aiStateRef.current.articleLookupContext.currentCase;
     if (!articleLookupCase) return;
     const strategy = buildLookupStrategies(articleLookupCase).find((item) => item.id === strategyId);
@@ -892,7 +897,7 @@ export default function Home() {
     else if (action.type === "CONFIRM_LOOKUP_CASE") showLookupStrategies();
     else if (action.type === "EDIT_LOOKUP_CASE") setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "수정할 조건을 입력해 주세요.\n예: 기간을 1997년 6~8월로 바꿔줘, 언론사는 매일경제만, 아시아나항공도 검색어에 넣어줘.", intent: "ARTICLE_LOOKUP" }]);
     else if (action.type === "RESET_ARTICLE_LOOKUP") resetArticleLookup();
-    else if (action.type === "USE_LOOKUP_STRATEGY" && action.value) useLookupStrategy(action.value);
+    else if (action.type === "USE_LOOKUP_STRATEGY" && action.value) applyLookupStrategy(action.value);
     else if (action.type === "SET_LOOKUP_RESULT" && (action.value === "FOUND" || action.value === "NOT_FOUND" || action.value === "CANDIDATE")) setLookupResultStatus(action.value);
     else if (action.type === "GENERATE_LOOKUP_REPLY") showLookupReplyDraft();
     else if (action.type === "SHOW_LOOKUP_GUIDANCE") {
@@ -1025,6 +1030,22 @@ export default function Home() {
     }]);
   }
 
+  function showPolicyHandoff(question: string, handoff: PolicyHandoff) {
+    const text = `${handoff.label} 관련 문의는 이용 조건·계약·저작권 판단이 필요해 챗봇이 허용 여부, 금액, 계약 기간을 추정하거나 단정하지 않습니다.\n\n${handoff.guidance}`;
+    updateWorkingState({ lastIntent: "SUPPORT_TRIAGE" });
+    recordInsight({ eventType: "SUPPORT_TRIAGE_USED", pageType: pageContext.pageType });
+    setMessages((current) => [...current, {
+      id: nextId.current++,
+      role: "assistant",
+      text,
+      intent: "SUPPORT_TRIAGE",
+      question,
+      supportRequest: true,
+      policyHandoff: true,
+      actions: [{ id: "policy-official-contact", label: "공식 안내 확인", type: "OPEN_URL", url: handoff.url }],
+    }]);
+  }
+
   function ask(question: string) {
     const cleanQuestion = question.trim();
     if (!cleanQuestion || isTyping) return;
@@ -1076,6 +1097,13 @@ export default function Home() {
           apiRedirect: true, question: cleanQuestion, intent: "OPEN_API_REDIRECT",
           actions: [{ id: "open-api", label: "뉴스토어 OPEN API 확인", type: "OPEN_URL", url: OPEN_API_PURCHASE_URL }],
         }]);
+        setIsTyping(false);
+        return;
+      }
+
+      const policyHandoff = getPolicyHandoff(cleanQuestion);
+      if (policyHandoff) {
+        showPolicyHandoff(cleanQuestion, policyHandoff);
         setIsTyping(false);
         return;
       }
@@ -1795,7 +1823,7 @@ export default function Home() {
                       ["지면 단서", message.articleLookupCase.pageHints.join(", ")],
                       ["자료 형태", materialTypeLabels[message.articleLookupCase.materialType]],
                     ].filter(([, value]) => value).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div>}
-                    {message.lookupStrategies && message.lookupStrategies.length > 0 && <div className="lookup-strategies"><strong>검색 전략</strong>{message.lookupStrategies.map((strategy, index) => <article key={strategy.id}><span>{index + 1}</span><div><b>{strategy.title}</b><p>{strategy.description}</p><code>{strategy.query}</code>{strategy.dateFrom && <small>기간 {strategy.dateFrom} ~ {strategy.dateTo}</small>}{strategy.media?.length ? <small>언론사 {strategy.media.join(", ")}</small> : null}{strategy.relatedSuggestions?.length ? <small>검색 범위를 넓히기 위한 관련 표현: {strategy.relatedSuggestions.join(", ")}</small> : null}<div><button type="button" onClick={() => copyText(strategy.query)}>검색식 복사</button><button type="button" onClick={() => embedded ? emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: strategy.query }) : emitHostAction({ type: "OPEN_URL", label: "BIGKinds 검색화면 열기", url: "https://www.bigkinds.or.kr/v2/news/search.do" })}>BIGKinds에서 검색</button><button type="button" onClick={() => useLookupStrategy(strategy.id)}>이 전략 사용</button></div></div></article>)}</div>}
+                    {message.lookupStrategies && message.lookupStrategies.length > 0 && <div className="lookup-strategies"><strong>검색 전략</strong>{message.lookupStrategies.map((strategy, index) => <article key={strategy.id}><span>{index + 1}</span><div><b>{strategy.title}</b><p>{strategy.description}</p><code>{strategy.query}</code>{strategy.dateFrom && <small>기간 {strategy.dateFrom} ~ {strategy.dateTo}</small>}{strategy.media?.length ? <small>언론사 {strategy.media.join(", ")}</small> : null}{strategy.relatedSuggestions?.length ? <small>검색 범위를 넓히기 위한 관련 표현: {strategy.relatedSuggestions.join(", ")}</small> : null}<div><button type="button" onClick={() => copyText(strategy.query)}>검색식 복사</button><button type="button" onClick={() => embedded ? emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: strategy.query }) : emitHostAction({ type: "OPEN_URL", label: "BIGKinds 검색화면 열기", url: "https://www.bigkinds.or.kr/v2/news/search.do" })}>BIGKinds에서 검색</button><button type="button" onClick={() => applyLookupStrategy(strategy.id)}>이 전략 사용</button></div></div></article>)}</div>}
                     {message.replyDraft && <div className="lookup-reply-draft"><strong>문의 회신 초안</strong><p>{message.replyDraft}</p><button type="button" onClick={() => copyText(message.replyDraft || "")}>초안 복사</button></div>}
                     {message.searchQuery && (
                       <div className="search-query-answer">

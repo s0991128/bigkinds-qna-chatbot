@@ -108,7 +108,7 @@ function extractPersons(value: string) {
 }
 
 function extractOrganizations(value: string) {
-  const labelled = extractLabeledValues(value, "소속|당시\s*소속|회사|기관");
+  const labelled = extractLabeledValues(value, "소속|당시\\s*소속|회사|기관");
   const known = [...value.matchAll(/아시아나(?:항공)?|[가-힣A-Za-z0-9]+(?:항공|신문|대학교|연구원|공사|협회|재단|회사)/g)].map((match) => match[0]);
   return unique([...labelled, ...known]);
 }
