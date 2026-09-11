@@ -225,6 +225,10 @@ button { -webkit-tap-highlight-color: transparent; }
 .diagnostic-flow strong { color: var(--navy-900); font-size: 11px; }
 .diagnostic-flow > div { display: flex; flex-wrap: wrap; gap: 5px; }
 .diagnostic-flow button { padding: 6px 8px; border: 1px solid #d3e0f2; border-radius: 999px; background: #f8fbff; color: #3d5f91; cursor: pointer; font-size: 10px; }
+.support-case-card { display: grid; gap: 7px; margin-top: 10px; padding: 10px; border: 1px solid #d9e5f4; border-radius: 10px; background: #f8fbff; }
+.support-case-card > div { display: flex; flex-wrap: wrap; gap: 5px; }
+.support-case-card span { padding: 4px 7px; border-radius: 999px; background: #e8f1ff; color: #2d5488; font-size: 11px; }
+.support-case-card small { color: #718096; font-size: 10px; }
 .api-redirect { margin-top: 10px; padding-top: 9px; border-top: 1px solid #edf1f5; }
 .api-redirect button { padding: 8px 10px; border: 1px solid #2d70dc; border-radius: 8px; background: #2d70dc; color: white; cursor: pointer; font-size: 10px; font-weight: 750; }
 .purpose-panel { padding: 14px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #f7fbff, #fff); }

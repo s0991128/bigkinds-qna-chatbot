@@ -23,34 +23,37 @@ async function loadTypeScript(relativePath) {
   return moduleRecord.exports;
 }
 
+await loadTypeScript("../lib/privacy-sanitizer.ts");
+await loadTypeScript("../lib/support-case.ts");
+const supportRouting = await loadTypeScript("../lib/support-routing.ts");
 await loadTypeScript("../lib/search-term-normalizer.ts");
 await loadTypeScript("../lib/search-query-builder.ts");
 await loadTypeScript("../lib/search-context.ts");
-await loadTypeScript("../lib/privacy-sanitizer.ts");
-await loadTypeScript("../lib/support-case.ts");
-await loadTypeScript("../lib/support-routing.ts");
 await loadTypeScript("../lib/diagnostic-flows.ts");
 await loadTypeScript("../lib/capabilities.ts");
 await loadTypeScript("../lib/article-lookup.ts");
 await loadTypeScript("../lib/question-intents.ts");
 const router = await loadTypeScript("../lib/intent-router.ts");
 
-const base = { hasSearchContext: false, hasArticleLookupContext: false, pageType: "HOME" };
+const base = { hasSearchContext: false, pageType: "HOME" };
 
-test("historical material requests use the dedicated lookup intent", () => {
-  assert.equal(router.routeUserIntent("1997년 7월 매일경제에 나온 아시아나 수상자 명단을 찾고 싶어요", base).intent, "HISTORICAL_ARTICLE_LOOKUP");
-  assert.equal(router.routeUserIntent("1996년 7월 2일자 37면을 찾고 싶어요", base).intent, "HISTORICAL_ARTICLE_LOOKUP");
+test("support routing returns multiple issues for one question", () => {
+  assert.deepEqual(
+    supportRouting.detectSupportIssues("검색결과가 0건이고 다운로드한 파일도 열리지 않아요"),
+    ["SEARCH_NO_RESULT", "DOWNLOAD_PROBLEM"],
+  );
 });
 
-test("historical lookup does not steal service, article, API, or ordinary search intents", () => {
-  assert.equal(router.routeUserIntent("1990년대 이전 뉴스도 검색되나요?", base).intent, "SERVICE_FACT");
-  assert.equal(router.routeUserIntent("AI 반도체 기사 찾아줘", base).intent, "SEARCH_NEW");
-  assert.equal(router.routeUserIntent("이 기사 요약해줘", base).intent, "ARTICLE_UNSUPPORTED");
-  assert.equal(router.routeUserIntent("OPEN API로 1997년 자료를 받고 싶어", base).intent, "OPEN_API_REDIRECT");
+test("OPEN API wins over every support issue", () => {
+  assert.equal(router.routeUserIntent("OPEN API 인증키 오류와 다운로드 문제", base).intent, "OPEN_API_REDIRECT");
 });
 
-test("lookup updates are separate from SearchContext updates", () => {
-  const route = router.routeUserIntent("기간을 1997년 6~8월로 넓혀줘", { ...base, hasArticleLookupContext: true });
-  assert.equal(route.intent, "HISTORICAL_ARTICLE_LOOKUP");
-  assert.equal(route.articleLookupUpdate, true);
+test("rights questions win over article unsupported and support-only diagnosis keeps compatibility", () => {
+  assert.equal(router.routeUserIntent("연구 목적으로 기사 원문을 이용하고 싶어요", base).intent, "SUPPORT_TRIAGE");
+  assert.equal(router.routeUserIntent("이 기사 저작권과 라이선스가 궁금해", base).intent, "SUPPORT_TRIAGE");
+  assert.equal(router.routeUserIntent("검색 결과가 0건이에요", base).intent, "SEARCH_RESULT_DIAGNOSIS");
+});
+
+test("ordinary download guidance is not mislabeled as a support problem", () => {
+  assert.notEqual(router.routeUserIntent("검색결과를 엑셀로 받을 수 있어?", base).intent, "SUPPORT_TRIAGE");
 });

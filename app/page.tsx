@@ -24,6 +24,9 @@ import { applySearchTurn, createSearchContext, emptySearchContext, getSearchCont
 import type { SearchContext, SearchTurnResult } from "../lib/search-context";
 import { buildLookupStrategies, type LookupStrategy } from "../lib/article-lookup-strategy";
 import { createArticleLookupHistorySummary, createLookupReplyDraft, emptyArticleLookupContext, extractArticleLookupCase, isHistoricalArticleLookupQuestion, sanitizeLookupRequestForHistory, updateArticleLookupCase, type ArticleLookupCase, type ArticleLookupContext, type ArticleLookupResultStatus } from "../lib/article-lookup";
+import { createSupportCase, summarizeSupportCase, type SupportCase, type SupportIssueKind } from "../lib/support-case";
+import { detectSupportIssues, supportIssueLabel } from "../lib/support-routing";
+import { sanitizeSupportText } from "../lib/privacy-sanitizer";
 
 declare global {
   interface Window {
@@ -40,6 +43,8 @@ type Message = {
   isFallback?: boolean;
   answerModel?: AnswerViewModel;
   diagnostic?: DiagnosticFlow;
+  supportCase?: SupportCase;
+  supportDiagnostics?: DiagnosticFlow[];
   question?: string;
   apiRedirect?: boolean;
   searchQuery?: { value: string; description: string; input?: AiSearchInput };
@@ -57,6 +62,7 @@ type Message = {
   lookupResultStatus?: ArticleLookupResultStatus;
   replyDraft?: string;
   articleLookupRequest?: boolean;
+  supportRequest?: boolean;
   suggestedTerms?: AiSuggestedTerms[];
 };
 
@@ -175,11 +181,11 @@ function toPersistedMessage(message: Message): PersistedChatMessage {
   return {
     id: message.id,
     role: message.role,
-    text: message.articleLookupRequest ? sanitizeLookupRequestForHistory(message.text) : message.text,
+    text: message.articleLookupRequest ? sanitizeLookupRequestForHistory(message.text) : message.supportRequest ? sanitizeSupportText(message.text) : message.text,
     matchedId: message.matchedId,
     relatedIds: message.relatedIds,
     isFallback: message.isFallback,
-    question: message.articleLookupRequest && message.question ? sanitizeLookupRequestForHistory(message.question) : message.question,
+    question: message.articleLookupRequest && message.question ? sanitizeLookupRequestForHistory(message.question) : message.supportRequest && message.question ? sanitizeSupportText(message.question) : message.question,
     apiRedirect: message.apiRedirect,
     searchQuery: message.searchQuery ? { value: message.searchQuery.value, description: message.searchQuery.description } : undefined,
     searchInput: message.searchQuery?.input,
@@ -189,6 +195,7 @@ function toPersistedMessage(message: Message): PersistedChatMessage {
     actions: message.actions,
     answerModel: message.answerModel,
     diagnostic: message.diagnostic,
+    supportCaseSummary: summarizeSupportCase(message.supportCase || null) || undefined,
     searchDiagnosis: message.searchDiagnosis,
     manualReference: message.manualReference,
     articleLookupSummary: createArticleLookupHistorySummary(message.articleLookupCase || null),
@@ -216,6 +223,7 @@ function fromPersistedMessage(message: PersistedChatMessage): Message {
     actions: message.actions,
     answerModel: message.answerModel,
     diagnostic: message.diagnostic,
+    supportCase: message.supportCase ? { ...message.supportCase, sanitizedQuestion: sanitizeSupportText(message.supportCase.sanitizedQuestion) } : undefined,
     searchDiagnosis: message.searchDiagnosis,
     manualReference: message.manualReference,
     lookupResultStatus: message.lookupResultStatus,
@@ -371,7 +379,7 @@ export default function Home() {
     const firstUser = currentMessages.find((message) => message.role === "user");
     sessionRef.current.id = sessionIdRef.current;
     sessionRef.current.messages = currentMessages.map(toPersistedMessage);
-    sessionRef.current.title = firstUser?.text ? (firstUser.articleLookupRequest ? sanitizeLookupRequestForHistory(firstUser.text) : firstUser.text).slice(0, 80) : sessionRef.current.title;
+    sessionRef.current.title = firstUser?.text ? (firstUser.articleLookupRequest ? sanitizeLookupRequestForHistory(firstUser.text) : firstUser.supportRequest ? sanitizeSupportText(firstUser.text) : firstUser.text).slice(0, 80) : sessionRef.current.title;
     sessionRef.current.updatedAt = new Date().toISOString();
     delete sessionRef.current.closedAt;
     sessionRef.current.workingState = {
@@ -1020,6 +1028,7 @@ export default function Home() {
   function ask(question: string) {
     const cleanQuestion = question.trim();
     if (!cleanQuestion || isTyping) return;
+    const supportRequest = detectSupportIssues(cleanQuestion).length > 0;
     const articleLookupRequest = aiStateRef.current.activeMode === "ARTICLE_LOOKUP"
       || Boolean(aiStateRef.current.articleLookupContext.currentCase)
       || isHistoricalArticleLookupQuestion(cleanQuestion);
@@ -1029,6 +1038,7 @@ export default function Home() {
       role: "user",
       text: cleanQuestion,
       articleLookupRequest,
+      supportRequest,
       intent: articleLookupRequest ? "HISTORICAL_ARTICLE_LOOKUP" : undefined,
     };
 
@@ -1088,6 +1098,25 @@ export default function Home() {
           actions: [{ id: "article-search-build", label: "검색식 만들어보기", type: "SET_MODE", value: "SEARCH_BUILD" }],
           question: cleanQuestion,
         }]);
+        setIsTyping(false);
+        return;
+      }
+
+      if (routed.intent === "SUPPORT_TRIAGE") {
+        const supportCase = createSupportCase(cleanQuestion, routed.supportIssues || []);
+        const supportDiagnostics = supportCase.issues.map((issue) => getDiagnosticFlow(issue));
+        setMessages((current) => [...current, {
+          id: nextId.current++, role: "assistant",
+          text: supportCase.issues.length > 1
+            ? `문의 내용을 ${supportCase.issues.length}개 항목으로 나누어 확인해 볼게요: ${supportCase.issues.map(supportIssueLabel).join(", ")}`
+            : `${supportIssueLabel(supportCase.primaryIssue || "ACCOUNT_PROBLEM")} 문의로 분류했어요. 아래 항목을 선택해 주세요.`,
+          supportCase,
+          supportDiagnostics,
+          intent: "SUPPORT_TRIAGE",
+          question: cleanQuestion,
+          supportRequest: true,
+        }]);
+        updateWorkingState({ lastIntent: "SUPPORT_TRIAGE" });
         setIsTyping(false);
         return;
       }
@@ -1794,6 +1823,8 @@ export default function Home() {
                       </div>
                     )}
                     {message.searchDiagnosis && <div className="search-diagnosis"><strong>검색식 진단</strong><span>입력한 검색식</span><code>{message.searchDiagnosis.input}</code><span>권장 검색식</span><code>{message.searchDiagnosis.suggestion}</code><p>{message.searchDiagnosis.message}</p>{message.manualReference && <small className="authority-badge">{message.manualReference.label} 검색하기 {message.manualReference.section} 기준</small>}<div><button type="button" onClick={() => copyText(message.searchDiagnosis?.suggestion || "")}>수정 검색식 복사</button><button type="button" onClick={() => handleMessageAction({ id: "apply-diagnosis-inline", label: "수정 검색식 사용", type: "APPLY_SEARCH_DIAGNOSIS", value: message.searchDiagnosis?.suggestion })}>수정 검색식 사용</button></div></div>}
+                    {message.supportCase && <div className="support-case-card"><strong>문의 유형</strong><div>{message.supportCase.issues.map((issue) => <span key={issue}>{supportIssueLabel(issue)}</span>)}</div><small>질문 원문과 개인정보는 문의 기록에 저장하지 않습니다.</small></div>}
+                    {message.supportDiagnostics?.map((flow) => <div className="diagnostic-flow" key={flow.kind}><strong>{flow.title}</strong><div>{flow.options.map((option) => <button type="button" key={option.label} onClick={() => ask(option.question)}>{option.label}</button>)}</div></div>)}
                     {message.capabilities && <div className="capability-answer"><strong>추천 기능</strong>{message.capabilities.map((capability) => {
                       const source = capability.sourceIds.map((id) => knowledge.find((item) => item.id === id)).find(Boolean);
                       return <article key={capability.id}><div><b>{capability.label}</b><p>{capability.description}</p></div><div><button type="button" onClick={() => ask(`${capability.label} 사용법을 알려줘`)}>사용법 보기</button><a href={source?.source?.url ?? FAQ_SOURCE_URL} target="_blank" rel="noreferrer">공식 근거 ↗</a></div></article>;

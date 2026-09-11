@@ -29,6 +29,9 @@ async function loadTypeScript(relativePath) {
 await loadTypeScript("../lib/search-term-normalizer.ts");
 await loadTypeScript("../lib/search-query-builder.ts");
 await loadTypeScript("../lib/search-context.ts");
+await loadTypeScript("../lib/privacy-sanitizer.ts");
+await loadTypeScript("../lib/support-case.ts");
+await loadTypeScript("../lib/support-routing.ts");
 await loadTypeScript("../lib/diagnostic-flows.ts");
 const capabilities = await loadTypeScript("../lib/capabilities.ts");
 await loadTypeScript("../lib/article-lookup.ts");

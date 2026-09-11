@@ -19,12 +19,15 @@ import {
 import { getSearchContextStatus } from "./search-context";
 import type { SearchContext, SearchTurnResult } from "./search-context";
 import { isArticleLookupUpdateQuestion, isHistoricalArticleLookupQuestion } from "./article-lookup";
+import { detectSupportIssues } from "./support-routing";
+import type { SupportIssueKind } from "./support-case";
 
 export type UserIntent =
   | "SERVICE_OVERVIEW"
   | "SERVICE_FACT"
   | "SERVICE_GUIDE"
   | "OPEN_API_REDIRECT"
+  | "SUPPORT_TRIAGE"
   | "ARTICLE_UNSUPPORTED"
   | "HISTORICAL_ARTICLE_LOOKUP"
   | "META"
@@ -44,6 +47,7 @@ export type IntentRoute = {
   diagnosticKind?: ReturnType<typeof detectDiagnosticKind>;
   sensitive?: boolean;
   articleLookupUpdate?: boolean;
+  supportIssues?: SupportIssueKind[];
 };
 
 export type IntentRouteContext = {
@@ -60,8 +64,11 @@ export function routeUserIntent(question: string, context: IntentRouteContext): 
   const clean = question.trim();
   const historicalLookup = isHistoricalArticleLookupQuestion(clean);
   const lookupUpdate = Boolean(context.hasArticleLookupContext && isArticleLookupUpdateQuestion(clean));
-  if (sensitivePattern.test(clean) && !historicalLookup && !lookupUpdate) return { intent: "CLARIFY", sensitive: true };
   if (isOpenApiQuestion(clean)) return { intent: "OPEN_API_REDIRECT" };
+  if (sensitivePattern.test(clean) && !historicalLookup && !lookupUpdate) return { intent: "CLARIFY", sensitive: true };
+  const supportIssues = detectSupportIssues(clean);
+  const onlyLegacySearchNoResult = supportIssues.length === 1 && supportIssues[0] === "SEARCH_NO_RESULT";
+  if (supportIssues.length && !onlyLegacySearchNoResult) return { intent: "SUPPORT_TRIAGE", supportIssues };
   if (isArticleContentQuestion(clean)) return { intent: "ARTICLE_UNSUPPORTED" };
   if (isChatbotMetaQuestion(clean)) return { intent: "META" };
   if (isServiceOverviewQuestion(clean)) return { intent: "SERVICE_OVERVIEW" };
