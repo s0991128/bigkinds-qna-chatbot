@@ -20,7 +20,7 @@ import { routeUserIntent } from "../lib/intent-router";
 import type { UserIntent } from "../lib/intent-router";
 import { diagnoseSearchExpression, parseSearchExpression, SearchDiagnosis } from "../lib/search-diagnostics";
 import { archiveChatSession, ChatSession, createChatSession, loadActiveChatSession, PersistedChatMessage, PersistedMessageAction, saveActiveChatSession, shouldStartNewSession } from "../lib/chat-session";
-import type { AiInterpretation, AiIntent, AiRouterResponse, AiSearchInput, AiSuggestedTerms, AiTask } from "../lib/ai/types";
+import type { AiInterpretation, AiIntent, AiRouterResponse, AiSearchInput, AiSuggestedTerms, AiTask, DecisionSource } from "../lib/ai/types";
 import { applySearchTurn, createSearchContext, emptySearchContext, getSearchContextStatus } from "../lib/search-context";
 import type { SearchContext, SearchTurnResult } from "../lib/search-context";
 import { buildLookupStrategies, type LookupStrategy } from "../lib/article-lookup-strategy";
@@ -66,6 +66,9 @@ type Message = {
   supportRequest?: boolean;
   policyHandoff?: boolean;
   suggestedTerms?: AiSuggestedTerms[];
+  decisionSource?: DecisionSource;
+  aiTask?: AiTask;
+  aiAvailable?: boolean;
 };
 
 type StartMode = "NEWS_FIND" | "SEARCH_BUILD" | "SEARCH_DIAGNOSIS" | "FEATURE_RECOMMENDATION" | "TROUBLESHOOT" | "USAGE_GUIDE" | "ARTICLE_LOOKUP" | null;
@@ -119,6 +122,8 @@ const dataScriptPaths = [
   "/data/manual-knowledge.js",
   "/data/historical-lookup.js",
 ];
+
+const CHAT_TEASER_DISMISSED_KEY = "bigkinds-chat-teaser-dismissed";
 
 const QNA_SOURCE_URL = "https://www.bigkinds.or.kr/news/qnaList.do";
 const materialTypeLabels: Record<ArticleLookupCase["materialType"], string> = {
@@ -228,6 +233,9 @@ function toPersistedMessage(message: Message): PersistedChatMessage {
     lookupStrategies: message.lookupStrategies,
     capabilities: message.capabilities,
     suggestedTerms: message.suggestedTerms,
+    decisionSource: message.decisionSource,
+    aiTask: message.aiTask,
+    aiAvailable: message.aiAvailable,
   };
 }
 
@@ -264,6 +272,9 @@ function fromPersistedMessage(message: PersistedChatMessage): Message {
     lookupStrategies: message.lookupStrategies,
     capabilities: message.capabilities,
     suggestedTerms: message.suggestedTerms,
+    decisionSource: message.decisionSource,
+    aiTask: message.aiTask,
+    aiAvailable: message.aiAvailable,
   };
 }
 
@@ -273,6 +284,7 @@ export default function Home() {
   const [isTyping, setIsTyping] = useState(false);
   const [embedded, setEmbedded] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [showChatTeaser, setShowChatTeaser] = useState(false);
   const [selectedKnowledgeType, setSelectedKnowledgeType] = useState<KnowledgeType | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [knowledge, setKnowledge] = useState<SearchableDocument[]>([]);
@@ -289,6 +301,7 @@ export default function Home() {
   const [queryBuilder, setQueryBuilder] = useState<SearchQueryInput>({ any: [], all: [], exact: [], exclude: [] });
   const [queryBuilderText, setQueryBuilderText] = useState<Record<string, string>>({ any: "", all: "", exact: "", exclude: "" });
   const nextId = useRef(2);
+  const chatOpenRef = useRef(false);
   const endRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<ChatSession>(createChatSession());
   const sessionIdRef = useRef(sessionRef.current.id);
@@ -307,6 +320,7 @@ export default function Home() {
     articleLookupContext: emptyArticleLookupContext(),
   });
   const aiStateRef = workingStateRef;
+  const routingTraceRef = useRef<{ decisionSource: DecisionSource; aiTask?: AiTask; aiAvailable?: boolean }>({ decisionSource: "DETERMINISTIC" });
 
   useEffect(() => {
     const isEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
@@ -355,6 +369,7 @@ export default function Home() {
       saveActiveChatSession(sessionRef.current);
     }
     hydratedRef.current = true;
+    chatOpenRef.current = isEmbed;
     startTransition(() => {
       setEmbedded(isEmbed);
       setChatOpen(isEmbed);
@@ -380,6 +395,16 @@ export default function Home() {
     };
     window.addEventListener("pagehide", onPageHide);
 
+    const teaserTimer = !isEmbed ? window.setTimeout(() => {
+      if (chatOpenRef.current) return;
+      try {
+        if (window.sessionStorage.getItem(CHAT_TEASER_DISMISSED_KEY) === "1") return;
+      } catch {
+        // sessionStorage can be unavailable in privacy-restricted contexts.
+      }
+      setShowChatTeaser(true);
+    }, 900) : undefined;
+
     let cancelled = false;
     (async () => {
       try {
@@ -396,6 +421,7 @@ export default function Home() {
 
     return () => {
       cancelled = true;
+      if (teaserTimer !== undefined) window.clearTimeout(teaserTimer);
       window.removeEventListener("message", onContext);
       window.removeEventListener("pagehide", onPageHide);
     };
@@ -453,6 +479,11 @@ export default function Home() {
     [knowledge],
   );
 
+  const groundedDocumentCount = useMemo(
+    () => knowledge.filter(isAnswerableDocument).length,
+    [knowledge],
+  );
+
   const knowledgeGroups = useMemo(() => {
     const counts = knowledge.reduce<Record<KnowledgeType, number>>(
       (result, document) => {
@@ -500,9 +531,20 @@ export default function Home() {
   }
 
   function openChat() {
+    chatOpenRef.current = true;
     setChatOpen(true);
+    setShowChatTeaser(false);
     setRecommendedQuestions((current) => generateRecommendedQuestions(pageContext.pageType, knowledge, current));
     setShowRecommendations(true);
+  }
+
+  function dismissChatTeaser() {
+    setShowChatTeaser(false);
+    try {
+      window.sessionStorage.setItem(CHAT_TEASER_DISMISSED_KEY, "1");
+    } catch {
+      // sessionStorage can be unavailable in privacy-restricted contexts.
+    }
   }
 
   function emitHostAction(action: { type: string; label?: string; url?: string; value?: string }) {
@@ -569,6 +611,20 @@ export default function Home() {
     if (message.question) ask(message.question);
   }
 
+  function setDecisionTrace(decisionSource: DecisionSource, aiTask?: AiTask, aiAvailable?: boolean) {
+    routingTraceRef.current = { decisionSource, aiTask, aiAvailable };
+    const eventType = decisionSource === "HARD_RULE"
+      ? "ROUTE_HARD_RULE"
+      : decisionSource === "DETERMINISTIC"
+        ? "ROUTE_DETERMINISTIC"
+        : decisionSource === "KNOWLEDGE_MATCH" ? "ROUTE_KNOWLEDGE" : "ROUTE_LLM";
+    recordInsight({ eventType, pageType: pageContext.pageType });
+  }
+
+  function decisionMeta(): Pick<Message, "decisionSource" | "aiTask" | "aiAvailable"> {
+    return { ...routingTraceRef.current };
+  }
+
   async function requestAi(question: string, task: AiTask = "ROUTE", stateOverride?: Partial<SearchWorkingState>) : Promise<AiRouterResponse> {
     if (aiStateRef.current.activeMode === "ARTICLE_LOOKUP" || aiStateRef.current.articleLookupContext.currentCase) {
       return { available: false, reason: "SENSITIVE" };
@@ -588,8 +644,12 @@ export default function Home() {
           state: { ...requestState, pageType: pageContext.pageType },
         }),
       });
-      return await response.json() as AiRouterResponse;
+      const result = await response.json() as AiRouterResponse;
+      if (result.available && result.interpretation) setDecisionTrace("LLM", task, true);
+      else if (routingTraceRef.current.decisionSource !== "HARD_RULE") routingTraceRef.current = { decisionSource: "DETERMINISTIC", aiTask: task, aiAvailable: false };
+      return result;
     } catch {
+      routingTraceRef.current = { decisionSource: "DETERMINISTIC", aiTask: task, aiAvailable: false };
       return { available: false, reason: "UPSTREAM" };
     }
   }
@@ -626,6 +686,7 @@ export default function Home() {
     const normalizedInput = validateSearchInput(normalizeSearchInput(input));
     const value = buildSearchQuery(normalizedInput);
     if (!value) return false;
+    if (routingTraceRef.current.decisionSource !== "LLM") setDecisionTrace("DETERMINISTIC");
     const description = describeSearchQuery(normalizedInput);
     const searchContext = createSearchContext(normalizedInput, mode === "UPDATE" ? "UPDATE" : "NEW", { previous: aiStateRef.current.searchContext });
     updateWorkingState({
@@ -646,6 +707,7 @@ export default function Home() {
       question: cleanQuestion,
       intent: mode === "UPDATE" ? "SEARCH_UPDATE" : "SEARCH_NEW",
       suggestedTerms,
+      ...decisionMeta(),
       actions: [
         { id: `copy-query-${assistantId}`, label: "검색식 복사", type: "COPY_QUERY", value },
         { id: `edit-query-${assistantId}`, label: "조건 수정", type: "SET_MODE", value: "SEARCH_BUILD" },
@@ -658,6 +720,7 @@ export default function Home() {
 
   function showCapabilityRecommendation(matches: Capability[], cleanQuestion: string) {
     if (!matches.length) return false;
+    if (routingTraceRef.current.decisionSource !== "LLM") setDecisionTrace("DETERMINISTIC");
     const capability = matches[0];
     const guideQuestions: Record<string, string> = {
       NEWS_SEARCH: "뉴스 검색은 어떻게 이용하나요?",
@@ -689,6 +752,7 @@ export default function Home() {
     setMessages((current) => [...current, {
       id: nextId.current++, role: "assistant", text: `추천 기능: ${matches[0].label}`,
       capabilities: matches, capabilityId: matches[0]?.id, intent: "FEATURE_RECOMMENDATION", question: cleanQuestion,
+      ...decisionMeta(),
       actions: capability ? [{ id: `capability-${capability.id}`, label: `${capability.label} 사용법 보기`, type: "SHOW_GUIDE", value: guideQuestions[capability.id] || `${capability.label} 사용법을 알려줘` }] : [],
     }]);
     matches.forEach((capability) => recordInsight({ eventType: "FEATURE_RECOMMENDED", pageType: pageContext.pageType, capabilityId: capability.id }));
@@ -699,10 +763,12 @@ export default function Home() {
     const matches = getCapabilitiesById(["NETWORK_ANALYSIS", "RELATED_WORDS", "KEYWORD_TREND", "INFORMATION_EXTRACTION"])
       .filter((capability) => capabilitySourcesExist(capability, knowledge));
     if (matches.length < 2) return false;
+    if (routingTraceRef.current.decisionSource !== "LLM") setDecisionTrace("DETERMINISTIC");
     updateWorkingState({ lastIntent: "FEATURE_RECOMMENDATION", lastCapabilityId: null });
     setMessages((current) => [...current, {
       id: nextId.current++, role: "assistant", text: "기능 비교: 목적에 따라 이렇게 구분할 수 있습니다.",
       capabilityComparison: matches, intent: "FEATURE_RECOMMENDATION", question: cleanQuestion,
+      ...decisionMeta(),
     }]);
     matches.forEach((capability) => recordInsight({ eventType: "FEATURE_RECOMMENDED", pageType: pageContext.pageType, capabilityId: capability.id }));
     return true;
@@ -745,19 +811,19 @@ export default function Home() {
       const kind = interpretation.diagnosticKind;
       if (kind === "SEARCH_NO_RESULT" || kind === "DOWNLOAD_PROBLEM" || kind === "API_ERROR") {
         const flow = getDiagnosticFlow(kind);
-        setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: flow.title, diagnostic: flow, question: cleanQuestion }]);
+        setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: flow.title, diagnostic: flow, question: cleanQuestion, ...decisionMeta() }]);
         recordInsight({ eventType: interpretation.intent === "SEARCH_DIAGNOSIS" ? "SEARCH_DIAGNOSIS_USED" : "TROUBLESHOOT_USED", pageType: pageContext.pageType });
         return true;
       }
     }
 
     if (interpretation.needsClarification && interpretation.clarifyingQuestion) {
-      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: interpretation.clarifyingQuestion || "원하는 목적을 조금 더 알려주세요.", isFallback: true, question: cleanQuestion }]);
+      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: interpretation.clarifyingQuestion || "원하는 목적을 조금 더 알려주세요.", isFallback: true, question: cleanQuestion, ...decisionMeta() }]);
       return true;
     }
 
     if (interpretation.intent === "OUT_OF_SCOPE") {
-      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "해당 질문은 빅카인즈 이용 방법과 관련된 질문이 아닙니다. 이 서비스는 빅카인즈 검색·분석·다운로드·수록 데이터 등 서비스 이용을 안내합니다.", isFallback: true, question: cleanQuestion, intent: "OUT_OF_SCOPE", actions: [
+      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "해당 질문은 빅카인즈 이용 방법과 관련된 질문이 아닙니다. 이 서비스는 빅카인즈 검색·분석·다운로드·수록 데이터 등 서비스 이용을 안내합니다.", isFallback: true, question: cleanQuestion, intent: "OUT_OF_SCOPE", ...decisionMeta(), actions: [
         { id: "out-news", label: "뉴스 찾기", type: "SET_MODE", value: "NEWS_FIND" },
         { id: "out-search", label: "검색식 만들기", type: "SET_MODE", value: "SEARCH_BUILD" },
         { id: "out-feature", label: "기능 추천", type: "SET_MODE", value: "FEATURE_RECOMMENDATION" },
@@ -769,14 +835,15 @@ export default function Home() {
   }
 
   async function answerSearchGoal(cleanQuestion: string) {
-    if (await answerWithAi(cleanQuestion, "INTERPRET_SEARCH_GOAL")) return true;
     const simpleInput = extractSimpleSearchGoal(cleanQuestion);
-    if (!simpleInput) return false;
-    if (!simpleInput.all.length && !simpleInput.any.length && !simpleInput.exact.length && !simpleInput.exclude.length) return false;
-    return renderSearchCoachMessage(normalizeSearchInput(simpleInput), cleanQuestion, undefined, [], "NEW");
+    if (simpleInput && (simpleInput.all.length || simpleInput.any.length || simpleInput.exact.length || simpleInput.exclude.length)) {
+      return renderSearchCoachMessage(normalizeSearchInput(simpleInput), cleanQuestion, undefined, [], "NEW");
+    }
+    return answerWithAi(cleanQuestion, "INTERPRET_SEARCH_GOAL");
   }
 
   function showArticleLookupCase(question: string, isUpdate = false) {
+    if (routingTraceRef.current.decisionSource !== "LLM") setDecisionTrace("DETERMINISTIC");
     const currentCase = aiStateRef.current.articleLookupContext.currentCase;
     const articleLookupCase = isUpdate && currentCase
       ? updateArticleLookupCase(currentCase, question)
@@ -794,6 +861,7 @@ export default function Home() {
       id: nextId.current++, role: "assistant",
       text: isUpdate ? "수정한 단서를 반영했습니다. 찾으시는 자료의 조건을 다시 확인해 주세요." : "찾으시는 자료의 조건을 이렇게 이해했습니다.",
       articleLookupCase,
+      ...decisionMeta(),
       intent: "HISTORICAL_ARTICLE_LOOKUP",
       actions: [
         { id: "confirm-lookup-case", label: "이 조건으로 찾기", type: "CONFIRM_LOOKUP_CASE" },
@@ -807,11 +875,13 @@ export default function Home() {
   function showLookupStrategies() {
     const articleLookupCase = aiStateRef.current.articleLookupContext.currentCase;
     if (!articleLookupCase) return;
+    if (routingTraceRef.current.decisionSource !== "LLM") setDecisionTrace("DETERMINISTIC");
     const lookupStrategies = buildLookupStrategies(articleLookupCase);
     setMessages((current) => [...current, {
       id: nextId.current++, role: "assistant",
       text: lookupStrategies.length ? "다음 순서로 찾아보는 것을 권장합니다." : "현재 단서만으로는 검색식을 만들기 어렵습니다. 기간·언론사·인물·소속 중 아는 정보를 더 입력해 주세요.",
       articleLookupCase,
+      ...decisionMeta(),
       lookupStrategies,
       intent: "HISTORICAL_ARTICLE_LOOKUP",
       actions: lookupStrategies.length ? [{ id: "edit-lookup-after-strategy", label: "조건 수정", type: "EDIT_LOOKUP_CASE" }] : [{ id: "edit-lookup-missing", label: "단서 추가", type: "EDIT_LOOKUP_CASE" }],
@@ -823,12 +893,14 @@ export default function Home() {
     if (!articleLookupCase) return;
     const strategy = buildLookupStrategies(articleLookupCase).find((item) => item.id === strategyId);
     if (!strategy) return;
+    if (routingTraceRef.current.decisionSource !== "LLM") setDecisionTrace("DETERMINISTIC");
     updateWorkingState({ articleLookupContext: { ...aiStateRef.current.articleLookupContext, selectedStrategyId: strategyId } });
     recordInsight({ eventType: "ARTICLE_LOOKUP_STRATEGY_USED", pageType: pageContext.pageType });
     setMessages((current) => [...current, {
       id: nextId.current++, role: "assistant",
       text: `선택한 검색식: ${strategy.query}\nBIGKinds에서 검색한 뒤 결과 상태를 선택해 주세요.`,
       articleLookupCase,
+      ...decisionMeta(),
       lookupStrategies: [strategy],
       intent: "HISTORICAL_ARTICLE_LOOKUP",
       actions: [
@@ -842,6 +914,7 @@ export default function Home() {
   function setLookupResultStatus(result: ArticleLookupResultStatus) {
     const articleLookupCase = aiStateRef.current.articleLookupContext.currentCase;
     if (!articleLookupCase) return;
+    if (routingTraceRef.current.decisionSource !== "LLM") setDecisionTrace("DETERMINISTIC");
     updateWorkingState({ articleLookupContext: { ...aiStateRef.current.articleLookupContext, lastResultStatus: result } });
     const eventType = result === "FOUND" ? "ARTICLE_LOOKUP_FOUND" : result === "NOT_FOUND" ? "ARTICLE_LOOKUP_NO_RESULT" : "ARTICLE_LOOKUP_CANDIDATE";
     recordInsight({ eventType, pageType: pageContext.pageType });
@@ -854,6 +927,7 @@ export default function Home() {
           ? "비슷한 자료는 확인됐지만 정확히 동일한 자료인지 추가 확인이 필요합니다."
           : "현재 입력한 조건의 BIGKinds 검색에서는 요청 자료를 확인하지 못했습니다.",
       articleLookupCase,
+      ...decisionMeta(),
       lookupResultStatus: result,
       intent: "HISTORICAL_ARTICLE_LOOKUP",
       actions: notFound ? [
@@ -872,10 +946,11 @@ export default function Home() {
     const articleLookupCase = aiStateRef.current.articleLookupContext.currentCase;
     const result = aiStateRef.current.articleLookupContext.lastResultStatus;
     if (!articleLookupCase || !result) return;
+    if (routingTraceRef.current.decisionSource !== "LLM") setDecisionTrace("DETERMINISTIC");
     const replyDraft = createLookupReplyDraft(articleLookupCase, result);
     if (!replyDraft) return;
     recordInsight({ eventType: "ARTICLE_LOOKUP_REPLY_DRAFTED", pageType: pageContext.pageType });
-    setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "문의 회신 초안입니다. 담당자명과 연락처는 자동으로 넣지 않았습니다.", articleLookupCase, lookupResultStatus: result, replyDraft, intent: "HISTORICAL_ARTICLE_LOOKUP" }]);
+    setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "문의 회신 초안입니다. 담당자명과 연락처는 자동으로 넣지 않았습니다.", articleLookupCase, lookupResultStatus: result, replyDraft, intent: "HISTORICAL_ARTICLE_LOOKUP", ...decisionMeta() }]);
   }
 
   function resetArticleLookup() {
@@ -888,12 +963,14 @@ export default function Home() {
     setShowPurposeMenu(false);
     setShowRecommendations(false);
     if (mode === "OPEN_API") {
+      setDecisionTrace("HARD_RULE");
       updateWorkingState({ activeMode: null, lastIntent: "OPEN_API_REDIRECT" as AiIntent });
       setMessages((current) => [...current, {
         id: nextId.current++, role: "assistant",
         text: "OPEN API 관련 사항은 뉴스토어에서 확인해 주세요.",
         apiRedirect: true,
         intent: "OPEN_API_REDIRECT",
+        ...decisionMeta(),
         actions: [{ id: "open-api", label: "뉴스토어 OPEN API 확인", type: "OPEN_URL", url: OPEN_API_PURCHASE_URL }],
       }]);
       recordInsight({ eventType: "OPEN_API_REDIRECT", pageType: pageContext.pageType });
@@ -985,6 +1062,7 @@ export default function Home() {
   }
 
   function showSearchDiagnosis(diagnosis: SearchDiagnosis, question: string) {
+    if (routingTraceRef.current.decisionSource !== "LLM") setDecisionTrace("DETERMINISTIC");
     const input = parseSearchExpression(diagnosis.suggestion);
     const proposed = createSearchContext(input, "DIAGNOSIS", { status: "PROPOSED", previous: aiStateRef.current.searchContext });
     setMessages((current) => [...current, {
@@ -994,6 +1072,7 @@ export default function Home() {
       manualReference: { label: "빅카인즈 사용자매뉴얼 v4.2", section: "4.1" },
       question,
       intent: "SEARCH_DIAGNOSIS",
+      ...decisionMeta(),
       actions: [
         { id: "copy-diagnosis-query", label: "수정 검색식 복사", type: "COPY_QUERY", value: diagnosis.suggestion },
         { id: "apply-diagnosis-query", label: "수정 검색식 사용", type: "APPLY_SEARCH_DIAGNOSIS", value: diagnosis.suggestion },
@@ -1010,6 +1089,7 @@ export default function Home() {
   }
 
   function showSearchResultDiagnosis(question: string, previousSearch: AiSearchInput | null) {
+    if (routingTraceRef.current.decisionSource !== "LLM") setDecisionTrace("DETERMINISTIC");
     const currentQuery = previousSearch ? buildSearchQuery(previousSearch) : "";
     const text = currentQuery
       ? `현재 검색조건을 더 좁힐 수 있습니다.\n현재 검색식: ${currentQuery}`
@@ -1017,6 +1097,7 @@ export default function Home() {
     setMessages((current) => [...current, {
       id: nextId.current++, role: "assistant", text,
       intent: "SEARCH_RESULT_DIAGNOSIS", question,
+      ...decisionMeta(),
       actions: [
         { id: "add-required", label: "반드시 포함할 단어 추가", type: "SET_MODE", value: "SEARCH_BUILD" },
         { id: "add-exact", label: "정확한 문구 지정", type: "SET_MODE", value: "SEARCH_BUILD" },
@@ -1032,6 +1113,7 @@ export default function Home() {
   }
 
   function showOfficialDocument(document: SearchableDocument, question: string, intent: UserIntent) {
+    if (routingTraceRef.current.decisionSource !== "LLM") setDecisionTrace("DETERMINISTIC");
     const answerModel = buildAnswerViewModel(document);
     const actions: PersistedMessageAction[] = [];
     if (intent === "SERVICE_OVERVIEW") {
@@ -1063,6 +1145,7 @@ export default function Home() {
       answerModel,
       question,
       intent,
+      ...decisionMeta(),
       actions,
     }]);
   }
@@ -1104,6 +1187,7 @@ export default function Home() {
   }
 
   function showPolicyHandoff(question: string, handoff: PolicyHandoff) {
+    setDecisionTrace("HARD_RULE");
     const supportIssues = detectSupportIssues(question);
     const supportCase = createSupportCase(question, supportIssues);
     const text = `${handoff.label} 관련 문의는 이용 조건·계약·저작권 판단이 필요해 챗봇이 허용 여부, 금액, 계약 기간을 추정하거나 단정하지 않습니다.\n\n${handoff.guidance}`;
@@ -1120,6 +1204,7 @@ export default function Home() {
       supportCase: supportIssues.length ? supportCase : undefined,
       supportDiagnostics: supportIssues.map((issue) => getDiagnosticFlow(issue)),
       policyHandoff: true,
+      ...decisionMeta(),
       actions: [{ id: "policy-official-contact", label: "공식 안내 확인", type: "SUPPORT_ESCALATE", url: handoff.url }],
     }]);
   }
@@ -1146,6 +1231,7 @@ export default function Home() {
     setIsTyping(true);
     setShowRecommendations(false);
     setShowPurposeMenu(false);
+    routingTraceRef.current = { decisionSource: "DETERMINISTIC" };
 
     const dateQuestion = isDateQuestion(cleanQuestion);
     const diagnosticKind = detectDiagnosticKind(cleanQuestion, pageContext.pageType);
@@ -1155,6 +1241,7 @@ export default function Home() {
     window.setTimeout(async () => {
       try {
         if (dateQuestion) {
+        setDecisionTrace("DETERMINISTIC");
         setMessages((current) => [
           ...current,
           {
@@ -1162,6 +1249,7 @@ export default function Home() {
             role: "assistant",
             text: `오늘은 ${todayInKorea()}입니다.\n\n한국 표준시(KST) 기준으로 안내했어요.`,
             question: cleanQuestion,
+            ...decisionMeta(),
           },
         ]);
         setIsTyping(false);
@@ -1169,11 +1257,13 @@ export default function Home() {
       }
 
       if (isOpenApiQuestion(cleanQuestion)) {
+        setDecisionTrace("HARD_RULE");
         recordInsight({ eventType: "OPEN_API_REDIRECT", pageType: pageContext.pageType });
         setMessages((current) => [...current, {
           id: nextId.current++, role: "assistant",
           text: "OPEN API 관련 문의는 뉴스토어에서 확인해 주세요. OPEN API의 구매, 계약, 이용 방법, 오류 및 데이터 활용 관련 사항은 담당 부서에서 안내하고 있습니다.",
           apiRedirect: true, question: cleanQuestion, intent: "OPEN_API_REDIRECT",
+          ...decisionMeta(),
           actions: [{ id: "open-api", label: "뉴스토어 OPEN API 확인", type: "OPEN_URL", url: OPEN_API_PURCHASE_URL }],
         }]);
         setIsTyping(false);
@@ -1196,12 +1286,15 @@ export default function Home() {
         pageType: pageContext.pageType,
         hasArticleLookupContext: Boolean(aiStateRef.current.articleLookupContext.currentCase),
       });
+      if (sensitive || routed.sensitive) setDecisionTrace("HARD_RULE");
 
       if (routed.intent === "ARTICLE_UNSUPPORTED") {
+        setDecisionTrace("HARD_RULE");
         setMessages((current) => [...current, {
           id: nextId.current++, role: "assistant",
           text: "기사 원문을 직접 읽거나 요약하는 기능은 제공하지 않습니다. 대신 해당 주제의 기사를 더 정확하게 찾을 수 있도록 검색식을 만들어드릴 수 있습니다.",
           isFallback: true, intent: "ARTICLE_UNSUPPORTED",
+          ...decisionMeta(),
           actions: [{ id: "article-search-build", label: "검색식 만들어보기", type: "SET_MODE", value: "SEARCH_BUILD" }],
           question: cleanQuestion,
         }]);
@@ -1210,6 +1303,7 @@ export default function Home() {
       }
 
       if (routed.intent === "SUPPORT_TRIAGE") {
+        setDecisionTrace(routed.supportIssues?.some((issue) => issue === "RIGHTS_LICENSE" || issue === "RIGHTS_RESEARCH") ? "HARD_RULE" : "DETERMINISTIC");
         const supportCase = createSupportCase(cleanQuestion, routed.supportIssues || []);
         const supportDiagnostics = supportCase.issues.map((issue) => getDiagnosticFlow(issue));
         recordSupportCaseInsights(supportCase.issues);
@@ -1221,6 +1315,7 @@ export default function Home() {
           supportCase,
           supportDiagnostics,
           intent: "SUPPORT_TRIAGE",
+          ...decisionMeta(),
           question: cleanQuestion,
           supportRequest: true,
         }]);
@@ -1230,10 +1325,11 @@ export default function Home() {
       }
 
       if (routed.intent === "META") {
+        setDecisionTrace("DETERMINISTIC");
         setMessages((current) => [...current, {
           id: nextId.current++, role: "assistant",
           text: "빅카인즈 검색·분석·다운로드 이용 방법과 공식 안내를 도와드려요. 원하는 목적을 골라보세요.",
-          isFallback: true, question: cleanQuestion, intent: "META",
+          isFallback: true, question: cleanQuestion, intent: "META", ...decisionMeta(),
           actions: purposeMenu.filter((item) => item.mode !== "OPEN_API").map((item) => ({ id: `meta-${item.label}`, label: item.label, type: "SET_MODE", value: item.mode })),
         }]);
         setIsTyping(false);
@@ -1284,6 +1380,18 @@ export default function Home() {
         }
       }
 
+      if (routed.intent === "SERVICE_OVERVIEW" || routed.intent === "SERVICE_GUIDE" || routed.intent === "SERVICE_FACT") {
+        setDecisionTrace("DETERMINISTIC");
+        setMessages((current) => [...current, {
+          id: nextId.current++, role: "assistant",
+          text: "저장된 공식 문서에서 이 이용 안내의 근거를 확인하지 못했습니다. 추정해서 답변하지 않으니 공식 Q&A에서 최신 안내를 확인해 주세요.",
+          isFallback: true, intent: routed.intent, question: cleanQuestion, ...decisionMeta(),
+          actions: [{ id: "open-qna-service-fallback", label: "공식 Q&A 열기", type: "OPEN_QNA" }],
+        }]);
+        setIsTyping(false);
+        return;
+      }
+
       if (routed.intent === "HISTORICAL_ARTICLE_LOOKUP" || (aiStateRef.current.activeMode === "ARTICLE_LOOKUP" && routed.intent === "CLARIFY")) {
         showArticleLookupCase(cleanQuestion, Boolean(routed.articleLookupUpdate));
         setIsTyping(false);
@@ -1297,6 +1405,14 @@ export default function Home() {
           setIsTyping(false);
           return;
         }
+        setDecisionTrace("DETERMINISTIC");
+        setMessages((current) => [...current, {
+          id: nextId.current++, role: "assistant",
+          text: "입력한 검색식에서 확인할 수 있는 문제를 찾지 못했습니다. AND·OR·NOT과 괄호를 명시해 다시 입력해 주세요.",
+          isFallback: true, intent: "SEARCH_EXPRESSION_DIAGNOSIS", question: cleanQuestion, ...decisionMeta(),
+        }]);
+        setIsTyping(false);
+        return;
       }
 
       if (routed.intent === "SEARCH_RESULT_DIAGNOSIS") {
@@ -1306,6 +1422,11 @@ export default function Home() {
       }
 
       if (routed.intent === "FEATURE_RECOMMENDATION") {
+        const ambiguousFeaturePurpose = /검색(?:을|해야)?\s*(?:해야|할지|인지)|분석(?:을|해야)?\s*(?:해야|할지|인지)|모르겠|어떤\s*(?:기능|방법)/i.test(cleanQuestion);
+        if (ambiguousFeaturePurpose && await answerWithAi(cleanQuestion, "ROUTE")) {
+          setIsTyping(false);
+          return;
+        }
         if (recommendFeatureForQuestion(cleanQuestion, routed.capabilityIds)) {
           setIsTyping(false);
           return;
@@ -1319,9 +1440,10 @@ export default function Home() {
       if (routed.intent === "TROUBLESHOOT") {
         const diagnosticKind = routed.diagnosticKind;
         if (diagnosticKind) {
+          setDecisionTrace("DETERMINISTIC");
           setMessages((current) => [...current, {
             id: nextId.current++, role: "assistant", text: getDiagnosticFlow(diagnosticKind).title,
-            diagnostic: getDiagnosticFlow(diagnosticKind), intent: "TROUBLESHOOT", question: cleanQuestion,
+            diagnostic: getDiagnosticFlow(diagnosticKind), intent: "TROUBLESHOOT", question: cleanQuestion, ...decisionMeta(),
           }]);
           updateWorkingState({ lastIntent: "TROUBLESHOOT" });
           recordInsight({ eventType: "TROUBLESHOOT_USED", pageType: pageContext.pageType });
@@ -1352,10 +1474,12 @@ export default function Home() {
       }
 
       if (routed.intent === "CLARIFY" && searchTurn?.mode === "CLARIFY") {
+        if (routingTraceRef.current.decisionSource !== "LLM") setDecisionTrace("DETERMINISTIC");
         setMessages((current) => [...current, {
           id: nextId.current++, role: "assistant",
           text: searchTurn.clarifyingQuestion || "기존 검색식에 조건을 추가할까요, 아니면 새 검색을 시작할까요?",
           isFallback: true, intent: "CLARIFY", question: cleanQuestion,
+          ...decisionMeta(),
           actions: [
             { id: "clarify-update", label: "이전 검색 이어가기", type: "SET_MODE", value: "SEARCH_BUILD" },
             { id: "clarify-new", label: "새 검색 시작", type: "RESET_SEARCH" },
@@ -1366,10 +1490,11 @@ export default function Home() {
       }
 
       if (routed.intent === "OUT_OF_SCOPE") {
+        setDecisionTrace("DETERMINISTIC");
         setMessages((current) => [...current, {
           id: nextId.current++, role: "assistant",
           text: "해당 질문은 빅카인즈 이용 방법과 관련된 질문이 아닙니다. 빅카인즈 검색·분석·다운로드 이용을 안내해 드릴게요.",
-          isFallback: true, intent: "OUT_OF_SCOPE", question: cleanQuestion,
+          isFallback: true, intent: "OUT_OF_SCOPE", question: cleanQuestion, ...decisionMeta(),
           actions: [
             { id: "not-search-news", label: "뉴스 찾기", type: "SET_MODE", value: "NEWS_FIND" },
             { id: "not-search-guide", label: "이용 안내", type: "SET_MODE", value: "USAGE_GUIDE" },
@@ -1391,9 +1516,10 @@ export default function Home() {
       }
 
       if (diagnosticKind && /안\s*나|없|오류|에러|실패|작동하지|문제/i.test(cleanQuestion)) {
+        setDecisionTrace("DETERMINISTIC");
         setMessages((current) => [...current, {
           id: nextId.current++, role: "assistant", text: getDiagnosticFlow(diagnosticKind).title,
-          diagnostic: getDiagnosticFlow(diagnosticKind), intent: diagnosticKind === "API_ERROR" ? "OPEN_API_REDIRECT" : "TROUBLESHOOT",
+          diagnostic: getDiagnosticFlow(diagnosticKind), intent: diagnosticKind === "API_ERROR" ? "OPEN_API_REDIRECT" : "TROUBLESHOOT", ...decisionMeta(),
           question: cleanQuestion,
         }]);
         updateWorkingState({ lastIntent: diagnosticKind === "API_ERROR" ? "TROUBLESHOOT" : "SEARCH_DIAGNOSIS" });
@@ -1411,10 +1537,11 @@ export default function Home() {
       }
 
       if (isChatbotMetaQuestion(cleanQuestion)) {
+        setDecisionTrace("DETERMINISTIC");
         setMessages((current) => [...current, {
           id: nextId.current++, role: "assistant",
           text: "빅카인즈 검색·분석·다운로드 이용 방법과 공식 안내를 도와드려요. 원하는 목적을 골라보세요.",
-          isFallback: true, question: cleanQuestion, intent: "META",
+          isFallback: true, question: cleanQuestion, intent: "META", ...decisionMeta(),
           actions: purposeMenu.filter((item) => item.mode !== "OPEN_API").map((item) => ({ id: `meta-${item.label}`, label: item.label, type: "SET_MODE", value: item.mode })),
         }]);
         setIsTyping(false);
@@ -1422,6 +1549,7 @@ export default function Home() {
       }
 
       if (isStoredArticleCountQuestion(cleanQuestion)) {
+        setDecisionTrace("DETERMINISTIC");
         const scaleDocument = knowledge.find((item) => item.id === "bigkinds-intro-data-scale");
         if (scaleDocument) {
           showOfficialDocument(scaleDocument, cleanQuestion, "SERVICE_FACT");
@@ -1437,6 +1565,7 @@ export default function Home() {
             isFallback: true,
             question: cleanQuestion,
             intent: "SERVICE_FACT",
+            ...decisionMeta(),
           },
         ]);
         setIsTyping(false);
@@ -1444,6 +1573,7 @@ export default function Home() {
       }
 
       if (isKnowledgeDocumentsQuestion(cleanQuestion)) {
+        setDecisionTrace("DETERMINISTIC");
         const groups = knowledgeGroups.filter((group) => group.count > 0).map((group) => `${group.label} ${group.count}건`);
         setMessages((current) => [
           ...current,
@@ -1453,6 +1583,7 @@ export default function Home() {
             text: `${groups.length ? `현재 검색 문서는 ${groups.join(", ")}로 구성되어 있습니다. ` : "검색 문서 유형을 확인하는 중입니다. "}뉴스 기사 원문 전체가 아니라 빅카인즈 공식 Q&A·FAQ·소개·정책 자료를 저장하며, 근거가 없는 질문에는 임의로 답변하지 않습니다.`,
             isFallback: true,
             question: cleanQuestion,
+            ...decisionMeta(),
           },
         ]);
         setIsTyping(false);
@@ -1460,6 +1591,7 @@ export default function Home() {
       }
 
       if (isQnaRankingQuestion(cleanQuestion)) {
+        setDecisionTrace("DETERMINISTIC");
         setMessages((current) => [
           ...current,
           {
@@ -1468,6 +1600,7 @@ export default function Home() {
             text: "저장된 Q&A 문서에는 조회수·추천수 같은 순위 정보가 없어 ‘가장 많이 묻는 Q&A Top 10’을 산정할 수 없습니다. 질문별 이용 빈도는 제공되지 않으므로, 아래 추천 질문이나 검색창에서 주제를 직접 찾아보세요.",
             isFallback: true,
             question: cleanQuestion,
+            ...decisionMeta(),
           },
         ]);
         setIsTyping(false);
@@ -1475,6 +1608,7 @@ export default function Home() {
       }
 
       if (isUnderspecifiedQuestion(cleanQuestion)) {
+        setDecisionTrace("DETERMINISTIC");
         setMessages((current) => [
           ...current,
           {
@@ -1483,6 +1617,7 @@ export default function Home() {
             text: "어떤 주제의 예시가 필요한지 조금 더 알려주세요. 예를 들어 ‘검색식을 만드는 예시를 보여줘’처럼 질문해 주시면 저장된 공식 문서를 기준으로 안내하겠습니다.",
             isFallback: true,
             question: cleanQuestion,
+            ...decisionMeta(),
           },
         ]);
         setIsTyping(false);
@@ -1490,6 +1625,7 @@ export default function Home() {
       }
 
       if (isArticleContentQuestion(cleanQuestion)) {
+        setDecisionTrace("HARD_RULE");
         setMessages((current) => [
           ...current,
           {
@@ -1497,6 +1633,7 @@ export default function Home() {
             role: "assistant",
             text: "기사 원문을 직접 읽거나 요약하는 기능은 제공하지 않습니다. 대신 해당 주제의 기사를 더 정확하게 찾을 수 있도록 검색식을 만들어드릴 수 있습니다.",
             isFallback: true, intent: "ARTICLE_UNSUPPORTED",
+            ...decisionMeta(),
             actions: [{ id: "article-search-build", label: "검색식 만들어보기", type: "SET_MODE", value: "SEARCH_BUILD" }],
             question: cleanQuestion,
           },
@@ -1506,6 +1643,7 @@ export default function Home() {
       }
 
       if (generalKnowledgeQuestion) {
+        setDecisionTrace("DETERMINISTIC");
         setMessages((current) => [
           ...current,
           {
@@ -1513,6 +1651,7 @@ export default function Home() {
             role: "assistant",
             text: "해당 질문은 빅카인즈 이용 방법과 관련된 질문이 아닙니다. 빅카인즈 검색·분석·다운로드·수록 데이터 이용을 안내해 드릴게요.",
             isFallback: true, intent: "OUT_OF_SCOPE",
+            ...decisionMeta(),
             actions: [
               { id: "general-news", label: "뉴스 찾기", type: "SET_MODE", value: "NEWS_FIND" },
               { id: "general-search", label: "검색식 만들기", type: "SET_MODE", value: "SEARCH_BUILD" },
@@ -1539,16 +1678,18 @@ export default function Home() {
           isFallback: true,
           fallbackKind: "SEARCH_GOAL",
           question: cleanQuestion,
+          ...decisionMeta(),
         }]);
         setIsTyping(false);
         return;
       }
 
       if (!dataReady) {
+        setDecisionTrace("DETERMINISTIC");
         setMessages((current) => [...current, {
           id: nextId.current++, role: "assistant",
           text: "공식 Q&A 데이터를 불러오는 중입니다. 데이터 로딩이 완료된 뒤 다시 질문해 주세요.",
-          isFallback: true, question: cleanQuestion,
+          isFallback: true, question: cleanQuestion, ...decisionMeta(),
         }]);
         setIsTyping(false);
         return;
@@ -1579,10 +1720,11 @@ export default function Home() {
 
       const confidence = evaluateSearchConfidence(cleanQuestion, safeResults);
       if (diagnosticKind && cleanQuestion.length < 40) {
+        setDecisionTrace("DETERMINISTIC");
         recordInsight({ eventType: "SEARCH_DIAGNOSIS_USED", pageType: pageContext.pageType });
         setMessages((current) => [
           ...current,
-          { id: assistantId, role: "assistant", text: getDiagnosticFlow(diagnosticKind).title, diagnostic: getDiagnosticFlow(diagnosticKind), question: cleanQuestion },
+          { id: assistantId, role: "assistant", text: getDiagnosticFlow(diagnosticKind).title, diagnostic: getDiagnosticFlow(diagnosticKind), question: cleanQuestion, ...decisionMeta() },
         ]);
       } else if (!best || !confidence.accepted || !isAnswerableDocument(best.item)) {
         const answeredByAi = await answerWithAi(cleanQuestion);
@@ -1590,6 +1732,7 @@ export default function Home() {
           setIsTyping(false);
           return;
         }
+        setDecisionTrace("DETERMINISTIC");
         recordInsight({ eventType: "NO_CONFIDENT_MATCH", pageType: pageContext.pageType });
         setMessages((current) => [
           ...current,
@@ -1599,9 +1742,11 @@ export default function Home() {
             text: "저장된 공식 문서에서 질문과 충분히 일치하는 근거를 찾지 못했습니다. 잘못된 안내를 피하기 위해 추정해서 답변하지 않습니다. 질문을 조금 더 구체적으로 입력하거나 빅카인즈 공식 Q&A에서 확인해 주세요.",
             isFallback: true,
             question: cleanQuestion,
+            ...decisionMeta(),
           },
         ]);
       } else {
+        setDecisionTrace("KNOWLEDGE_MATCH");
         const answerModel = buildAnswerViewModel(best.item);
         const supplementAnswer = null;
         updateWorkingState({ lastIntent: routed.intent === "SERVICE_FACT" || routed.intent === "SERVICE_GUIDE" ? routed.intent : "FAQ_SEARCH" });
@@ -1618,6 +1763,7 @@ export default function Home() {
             question: cleanQuestion,
             usedSupplement: Boolean(supplementAnswer),
             intent: routed.intent === "SERVICE_FACT" || routed.intent === "SERVICE_GUIDE" ? routed.intent : "FAQ_SEARCH",
+            ...decisionMeta(),
           },
         ]);
       }
@@ -1681,6 +1827,7 @@ export default function Home() {
     if (embedded) closeWidget();
     else {
       persistCurrentSessionNow();
+      chatOpenRef.current = false;
       setChatOpen(false);
     }
   }
@@ -1717,7 +1864,7 @@ export default function Home() {
               </p>
               <div className="metric-row" aria-label="프로토타입 특징">
               <div><strong>{faqCount}</strong><span>공식 FAQ</span></div>
-                <div><strong>공식</strong><span>근거 기반</span></div>
+                <div><strong>{dataReady ? groundedDocumentCount.toLocaleString("ko-KR") : "···"}</strong><span>공식 근거 문서</span></div>
                 <div><strong>0건</strong><span>기사 본문 저장</span></div>
               </div>
               <div className="knowledge-breakdown" aria-label="검색 문서 유형">
@@ -1907,6 +2054,7 @@ export default function Home() {
                 data-qa={message.role === "assistant" ? "assistant-message" : "user-message"}
                 data-qa-intent={message.role === "assistant" ? message.intent || undefined : undefined}
                 data-qa-capability={message.capabilityId || undefined}
+                data-qa-decision-source={message.role === "assistant" ? message.decisionSource || "DETERMINISTIC" : undefined}
               >
                 {message.role === "assistant" && <span className="message-avatar">B</span>}
                 <div className="message-stack">
@@ -1988,10 +2136,10 @@ export default function Home() {
                             : "기사 문장에서 특정 정보와 값을 추출합니다.";
                       return <article key={capability.id}><div><b>{capability.label}</b><p>{comparison}</p></div><button type="button" onClick={() => ask(`${capability.label} 사용법을 알려줘`)}>사용 방법 보기</button></article>;
                     })}</div>}
-                    {message.answerModel && (
+                    {message.answerModel && (message.answerModel.details || message.answerModel.steps.length > 0 || message.answerModel.cautions.length > 0) && (
                       <div className="structured-answer">
-                        <button className="answer-expand" type="button" aria-expanded={Boolean(expandedMessages[message.id])} onClick={() => setExpandedMessages((current) => ({ ...current, [message.id]: !current[message.id] }))}>{expandedMessages[message.id] ? "간단히 보기" : "자세히 보기"}</button>
-                        {expandedMessages[message.id] && <p className="answer-full">{message.answerModel.details}</p>}
+                        {message.answerModel.details && <button className="answer-expand" type="button" aria-expanded={Boolean(expandedMessages[message.id])} onClick={() => setExpandedMessages((current) => ({ ...current, [message.id]: !current[message.id] }))}>{expandedMessages[message.id] ? "간단히 보기" : "자세히 보기"}</button>}
+                        {message.answerModel.details && expandedMessages[message.id] && <p className="answer-full">{message.answerModel.details}</p>}
                         {message.answerModel.steps.length > 0 && <div className="answer-block"><strong>이용 순서</strong><ol>{message.answerModel.steps.map((step) => <li key={step}>{formatAnswer(step)}</li>)}</ol></div>}
                         {message.answerModel.cautions.length > 0 && <div className="answer-block caution-block"><strong>주의</strong><ul>{message.answerModel.cautions.map((caution) => <li key={caution}>{formatAnswer(caution)}</li>)}</ul></div>}
                       </div>
@@ -2085,6 +2233,37 @@ export default function Home() {
           <p className="free-note">누구나 무료로 이용할 수 있습니다.</p>
         </form>
       </section>}
+      {!embedded && (
+        <footer className="kpf-footer" data-qa="kpf-footer">
+          <div className="kpf-footer-main">
+            <div className="kpf-footer-organization">
+              <strong>한국언론진흥재단</strong>
+              <span>Korea Press Foundation</span>
+            </div>
+            <nav className="kpf-footer-links" aria-label="공식 사이트 링크">
+              <a href="https://www.kpf.or.kr/" target="_blank" rel="noreferrer">한국언론진흥재단 ↗</a>
+              <a href="https://www.bigkinds.or.kr/" target="_blank" rel="noreferrer">BIGKinds ↗</a>
+            </nav>
+          </div>
+          <div className="kpf-footer-bottom">
+            <span>서울특별시 중구 세종대로 124</span>
+            <span>Copyright © KOREA PRESS FOUNDATION. ALL RIGHTS RESERVED.</span>
+          </div>
+          <small>BIGKinds Support Copilot · AX PoC</small>
+        </footer>
+      )}
+      {!embedded && !chatOpen && showChatTeaser && (
+        <div className="chat-teaser" data-qa="chat-teaser">
+          <button className="chat-teaser-main" type="button" data-qa="chat-teaser-main" onClick={openChat}>
+            <span className="chat-teaser-accent" aria-hidden="true">⚡</span>
+            <span>
+              <strong>빅카인즈 이용 중 궁금한 점이 있나요?</strong>
+              <span>검색·분석·이용 방법을 빠르게 안내해 드려요.</span>
+            </span>
+          </button>
+          <button className="chat-teaser-close" type="button" data-qa="chat-teaser-close" onClick={(event) => { event.stopPropagation(); dismissChatTeaser(); }} aria-label="안내 말풍선 닫기">×</button>
+        </div>
+      )}
       {!embedded && !chatOpen && (
         <button className="page-launcher" type="button" data-qa="chat-launcher" onClick={openChat} aria-label="빅카인즈 이용 도우미 열기">
           B<span aria-hidden="true" />

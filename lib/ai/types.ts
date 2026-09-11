@@ -12,6 +12,7 @@ export const AI_INTENTS = [
 
 export type AiIntent = (typeof AI_INTENTS)[number];
 export type AiTask = "ROUTE" | "INTERPRET_SEARCH_GOAL" | "UPDATE_SEARCH" | "CLASSIFY_SEARCH_TURN";
+export type DecisionSource = "HARD_RULE" | "DETERMINISTIC" | "KNOWLEDGE_MATCH" | "LLM";
 
 export type AiSearchInput = {
   all: string[];

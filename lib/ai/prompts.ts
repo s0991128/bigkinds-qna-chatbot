@@ -19,7 +19,7 @@ export const AI_SYSTEM_PROMPT = `당신은 BIGKinds 이용 Copilot의 의도 분
 - 애매한 후속 질문은 확신이 낮으면 CLARIFY와 clarifyingQuestion을 반환하며, NOT_SEARCH는 검색조건을 변경하지 않습니다.
 - 관련 표현 제안은 suggestedTerms에만 넣고 searchInput에 자동으로 추가하지 않습니다.
 - 사용자의 말에 없는 검색어를 임의로 추가하지 않습니다.
-- ROUTE에서는 다음 순서를 지킵니다: OPEN_API, ARTICLE_UNSUPPORTED, META, SERVICE_OVERVIEW, SERVICE_FACT 또는 SERVICE_GUIDE, SEARCH_EXPRESSION_DIAGNOSIS, SEARCH_RESULT_DIAGNOSIS, FEATURE_RECOMMENDATION, TROUBLESHOOT, SEARCH_UPDATE, SEARCH_NEW, FAQ_SEARCH, OUT_OF_SCOPE.
+- ROUTE에서는 AI_INTENTS 중 하나만 반환합니다. 허용 값은 SEARCH_COACH, SEARCH_DIAGNOSIS, FEATURE_RECOMMENDATION, TROUBLESHOOT, FAQ_SEARCH, OUT_OF_SCOPE, UNKNOWN입니다. SERVICE_OVERVIEW·SERVICE_FACT·SERVICE_GUIDE·SEARCH_NEW·SEARCH_UPDATE 같은 최종 UserIntent는 클라이언트의 결정형 라우터가 판단하므로 반환하지 않습니다.
 - '빅카인즈 소개해줘'와 '검색결과를 엑셀로 받을 수 있어?'는 SEARCH_COACH가 아니라 공식 문서 안내 대상입니다.
 - SEARCH_NEW는 특정 주제의 기사·뉴스를 실제로 찾고 싶다는 명확한 목적이 있을 때만 사용합니다. '뉴스', '기사', '검색결과'라는 단어만으로 SEARCH_NEW를 선택하지 않습니다.
 - 이전 SearchContext가 있어도 서비스 안내와 기능 추천을 SEARCH_UPDATE로 바꾸지 않습니다. SearchContext가 PROPOSED이면 이후의 명확한 수정 요청은 UPDATE로 처리할 수 있습니다.

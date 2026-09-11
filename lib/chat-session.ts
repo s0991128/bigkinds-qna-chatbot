@@ -3,6 +3,7 @@ import type { Capability } from "./capabilities";
 import type { DiagnosticFlow } from "./diagnostic-flows";
 import type { SearchDiagnosis } from "./search-diagnostics";
 import type { AiSuggestedTerms } from "./ai/types";
+import type { AiTask, DecisionSource } from "./ai/types";
 import type { ArticleLookupContext, ArticleLookupHistorySummary } from "./article-lookup";
 import type { LookupStrategy } from "./article-lookup-strategy";
 import type { SupportCaseSummary } from "./support-case";
@@ -53,6 +54,9 @@ export type PersistedChatMessage = {
   supportCaseSummary?: SupportCaseSummary;
   capabilities?: Capability[];
   suggestedTerms?: AiSuggestedTerms[];
+  decisionSource?: DecisionSource;
+  aiTask?: AiTask;
+  aiAvailable?: boolean;
   createdAt?: string;
 };
 
