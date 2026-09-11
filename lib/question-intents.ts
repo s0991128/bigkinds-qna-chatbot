@@ -95,6 +95,7 @@ const simpleSearchStopWords = new Set([
   "포함해", "포함해줘", "포함해주세요", "같이", "함께", "빼줘", "제외해줘", "제외해", "없애줘", "언급되는지", "보고싶어",
   "검색결과", "검색결", "결과", "너무", "많이", "많아", "나오는데", "오는데", "어떻게", "줄여", "줄이고", "좁혀", "넓혀",
   "표현", "표현이", "이라는", "이라", "그거", "그것", "저거", "빼고", "말고", "찾아보고",
+  "관한", "관하여", "관련한", "관련하여", "대한", "대해", "대하여", "대해서", "살펴보고", "살펴보고싶어", "살펴보고싶어요",
   "이번에는", "이번엔", "이번", "새로", "아니", "그럼", "그러면", "그런데", "그리고", "여기에", "여기서", "아까", "방금", "대신",
 ]);
 
@@ -151,9 +152,12 @@ export function isServiceGuideQuestion(question: string) {
   if (/(?:내\s*)?엑셀\s*데이터.{0,16}(?:그래프|차트|시각화)|(?:그래프|차트|시각화).{0,16}(?:내\s*)?엑셀\s*데이터/i.test(question)) return false;
   const download = /다운로드|내려받|엑셀|excel|csv|파일|저장|받을\s*수/i.test(question);
   const usage = /검색\s*기간|언론사.{0,8}(?:선택|고르)|형태소\s*분석|개체명\s*분석|관계도\s*분석|연관어\s*분석|어떻게\s*(?:써|사용|이용|해)/i.test(question);
+  const searchOperatorUsage = /(?:검색식|검색\s*문법|검색\s*연산자|검색어\s*조합|\bAND\b|\bOR\b|\bNOT\b)/i.test(question)
+    && /사용법|문법|연산자|조합\s*방법|어떻게\s*(?:써|사용|조합)|알려/i.test(question)
+    && !requestPattern.test(question);
   const manualFeature = /키워드\s*트렌드|정보\s*추출|시각화|보고서|지역이슈|최신뉴스|주간\s*이슈|고신문|인용문|검색식.{0,12}저장|스크랩|나의\s*(?:뉴스|분석)/i.test(question);
   const asksForLocationOrSteps = /(?:어디서|어디에|어디|방법|순서|사용|이용|눌러|할\s*수)/i.test(question);
-  return download || usage || (manualFeature && asksForLocationOrSteps);
+  return download || usage || searchOperatorUsage || (manualFeature && asksForLocationOrSteps);
 }
 
 export function isServiceFactQuestion(question: string) {
@@ -164,7 +168,7 @@ export function isServiceFactQuestion(question: string) {
 export function isFeatureRecommendationQuestion(question: string): boolean {
 const relationshipSignal = /(?:같이|함께|서로|공동).{0,16}(?:언급|등장|나오|연결)|(?:언급|등장|나오).{0,16}(?:같이|함께|서로)|(?:인물|기업|기관).{0,8}(?:관계|관계도|연결)|관계가\s*(?:궁금|알고)|누구와\s*(?:같이|함께)\s*(?:등장|나오)/i;
 const relatedWordsSignal = /(?:연관어|연관\s*(?:된\s*)?키워드|관련\s*키워드|함께\s*나오는\s*단어|(?:많이|자주)\s*(?:나온|언급된)\s*단어)/i;
-  const manualCapabilitySignal = /키워드\s*트렌드|기사량|월별.{0,12}(?:변화|추이)|정보\s*추출|회사명.{0,12}(?:매출|추출|뽑)|매출액.{0,12}(?:추출|뽑)|사람\s*이름.{0,12}(?:기관|추출|뽑)|기관명.{0,12}(?:추출|뽑)|형태소|개체명|내\s*(?:엑셀|데이터).{0,16}(?:그래프|차트|시각화)|보고서.{0,12}(?:만들|저장|생성)|지역이슈|지역별.{0,20}(?:뉴스|지자체).{0,20}(?:분석|보고)|지자체\s*자료.{0,12}(?:분석|같이)|최신뉴스|주간\s*이슈|고신문|\d{4}년대\s*신문|인용문|검색식.{0,12}저장|스크랩|나의\s*(?:뉴스|분석)/i;
+  const manualCapabilitySignal = /키워드\s*트렌드|기사량|보도량|(?:기사|보도)\s*량.{0,8}(?:추이|변화)|(?:추이|변화).{0,8}(?:기사|보도)\s*량|(?:시간별|기간별|월별)\s*(?:기사|보도)\s*량|월별.{0,12}(?:변화|추이)|정보\s*추출|회사명.{0,12}(?:매출|추출|뽑)|매출액.{0,12}(?:추출|뽑)|사람\s*이름.{0,12}(?:기관|추출|뽑)|기관명.{0,12}(?:추출|뽑)|형태소|개체명|내\s*(?:엑셀|데이터).{0,16}(?:그래프|차트|시각화)|보고서.{0,12}(?:만들|저장|생성)|지역이슈|지역별.{0,20}(?:뉴스|지자체).{0,20}(?:분석|보고)|지자체\s*자료.{0,12}(?:분석|같이)|최신뉴스|주간\s*이슈|고신문|\d{4}년대\s*신문|인용문|검색식.{0,12}저장|스크랩|나의\s*(?:뉴스|분석)/i;
   const analysisSignal = /(?:분석|시각화|많이\s*(?:나오|언급)|자주\s*(?:나오|언급)|보고\s*싶)/i;
   return (relationshipSignal.test(question) || relatedWordsSignal.test(question) || manualCapabilitySignal.test(question))
     && (analysisSignal.test(question) || manualCapabilitySignal.test(question));

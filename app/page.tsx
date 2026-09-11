@@ -6,6 +6,7 @@ import { isAnswerableDocument, searchFaq, SearchableDocument } from "../lib/sear
 import { evaluateSearchConfidence } from "../lib/search-confidence";
 import { formatAnswer, OPEN_API_PURCHASE_URL } from "../lib/answer-format";
 import { buildAnswerViewModel, AnswerViewModel } from "../lib/answer-model";
+import { getDocumentSourceUrl } from "../lib/source-link";
 import { classifyPagePath, createPageContext, pageTypeLabels, PageContext } from "../lib/page-context";
 import { buildSearchQuery, describeSearchQuery, validateSearchInput, SearchQueryInput } from "../lib/search-query-builder";
 import { normalizeSearchInput } from "../lib/search-term-normalizer";
@@ -1041,7 +1042,7 @@ export default function Home() {
         { id: "overview-guide", label: "이용 방법", type: "SET_MODE", value: "USAGE_GUIDE" },
       );
     } else if (document.source?.url) {
-      actions.push({ id: `source-${document.id}`, label: document.sourceType === "USER_MANUAL" ? "매뉴얼 근거 보기" : "공식 원문 보기", type: "OPEN_URL", url: document.source.url });
+      actions.push({ id: `source-${document.id}`, label: document.sourceType === "USER_MANUAL" ? "매뉴얼 근거 보기" : "공식 원문 보기", type: "OPEN_URL", url: getDocumentSourceUrl(document) });
     }
     const summary = intent === "SERVICE_OVERVIEW"
       ? `${answerModel.summary}\n\n주요 활용:\n${(document.facts || []).map((fact) => `- ${fact}`).join("\n")}\n\n어떤 작업을 하시려는지 알려주시면 맞는 기능을 찾아드릴게요.`
@@ -1152,7 +1153,8 @@ export default function Home() {
     const generalKnowledgeQuestion = !sensitive && isLikelyGeneralKnowledgeQuestion(cleanQuestion);
 
     window.setTimeout(async () => {
-      if (dateQuestion) {
+      try {
+        if (dateQuestion) {
         setMessages((current) => [
           ...current,
           {
@@ -1553,7 +1555,7 @@ export default function Home() {
       }
 
       const searchHelp = /검색식|검색어|연산자/i.test(cleanQuestion) && /어떻게|방법|사용|쓰|조합/i.test(cleanQuestion);
-      const searchHelpDocument = searchHelp ? knowledge.find((item) => item.id === "official-faq-17") : undefined;
+      const searchHelpDocument = searchHelp ? knowledge.find((item) => item.id === "manual-search-operators") : undefined;
       const searchUsageDocument = isSearchUsageQuestion(cleanQuestion)
         ? knowledge.find((item) => item.id === "bigkinds-intro-overview")
         : undefined;
@@ -1620,7 +1622,19 @@ export default function Home() {
         ]);
       }
 
-      setIsTyping(false);
+        setIsTyping(false);
+      } catch (error) {
+        console.error("Chatbot request failed", error);
+        setMessages((current) => [...current, {
+          id: nextId.current++,
+          role: "assistant",
+          text: "요청을 처리하는 중 문제가 발생했습니다. 조건을 다시 확인해 주세요.",
+          isFallback: true,
+          question: cleanQuestion,
+        }]);
+      } finally {
+        setIsTyping(false);
+      }
     }, 420);
   }
 
@@ -1767,8 +1781,8 @@ export default function Home() {
                       )}
                       <div className="knowledge-document-source">
                         <span>기준일 {selectedDocument.effectiveDate || "-"}</span>
-                        {selectedDocument.source?.url ? (
-                          <a href={selectedDocument.source.url} target="_blank" rel="noreferrer">공식 원문 확인 ↗</a>
+                        {getDocumentSourceUrl(selectedDocument) ? (
+                          <a href={getDocumentSourceUrl(selectedDocument)} target="_blank" rel="noreferrer">공식 원문 확인 ↗</a>
                         ) : <span>{selectedDocument.source?.label || "공식 자료"}</span>}
                       </div>
                     </article>
@@ -1900,7 +1914,7 @@ export default function Home() {
                     {matched && <span className="answer-label">{matched.category}</span>}
                     <p>{message.text}</p>
                     {message.apiRedirect && <div className="api-redirect"><button type="button" data-qa="action-button" data-qa-action="OPEN_API_REDIRECT" onClick={() => emitHostAction({ type: "OPEN_URL", label: "뉴스토어 OPEN API 확인", url: OPEN_API_PURCHASE_URL })}>뉴스토어 OPEN API 확인 ↗</button></div>}
-                    {message.articleLookupCase && <div className="article-lookup-card" data-qa="lookup-case" data-qa-lookup-status={message.lookupResultStatus || undefined}><strong>자료 찾기 조건</strong><dl>{[
+                    {message.articleLookupCase && <div className="article-lookup-card" data-qa="lookup-case" data-qa-ready={message.articleLookupCase.status === "READY" ? "true" : "false"} data-qa-lookup-status={message.lookupResultStatus || undefined}><strong>자료 찾기 조건</strong><dl>{[
                       ["기간", message.articleLookupCase.period.originalText || (message.articleLookupCase.period.from ? `${message.articleLookupCase.period.from} ~ ${message.articleLookupCase.period.to}` : "")],
                       ["언론사", message.articleLookupCase.media.join(", ")],
                       ["인물", message.articleLookupCase.persons.join(", ")],

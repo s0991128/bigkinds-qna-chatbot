@@ -39,6 +39,16 @@ test("historical lookup extracts a month, media, organization, and award-list si
   assert.equal(articleCase.materialType, "AWARD_LIST");
 });
 
+test("historical lookup accepts spaced role and award wording", () => {
+  const articleCase = lookup.extractArticleLookupCase("1997년 7월경 매일경제에 실린 아시아나 직원의 노동부 장관 표창 명단을 찾고 싶어요", "2026-09-11T00:00:00.000Z");
+  assert.equal(articleCase.status, "READY");
+  assert.equal(articleCase.period.precision, "APPROXIMATE");
+  assert.deepEqual(articleCase.media, ["매일경제"]);
+  assert.ok(articleCase.organizations.includes("아시아나"));
+  assert.ok(articleCase.events.includes("노동부장관 표창"));
+  assert.equal(articleCase.materialType, "AWARD_LIST");
+});
+
 test("historical lookup extracts an exact date and page hint", () => {
   const articleCase = lookup.extractArticleLookupCase("1996년 7월 2일자 37면을 찾고 싶어요", "2026-09-09T00:00:00.000Z");
   assert.equal(articleCase.period.precision, "EXACT");

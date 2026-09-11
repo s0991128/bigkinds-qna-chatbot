@@ -118,7 +118,11 @@ function extractOrganizations(value: string) {
 }
 
 function extractEvents(value: string) {
-  return eventNames.filter((event) => value.includes(event));
+  const events = eventNames.filter((event) => value.includes(event));
+  if (/노동부\s*장관\s*표창/.test(value) && !events.includes("노동부장관 표창")) {
+    events.push("노동부장관 표창");
+  }
+  return events;
 }
 
 function deriveMaterialType(value: string, awards: string[], pageHints: string[]): ArticleLookupMaterialType {

@@ -70,6 +70,15 @@ test("서비스 응답은 공식 문서·다음 행동·인사이트 이벤트�
   assert.match(insights, /SERVICE_OVERVIEW_USED/);
   assert.match(insights, /SERVICE_FACT_USED/);
   assert.match(insights, /SERVICE_GUIDE_USED/);
+  assert.match(page, /manual-search-operators/);
+  assert.match(page, /getDocumentSourceUrl/);
+});
+
+test("질문 처리 예외는 안전한 답변과 로딩 종료로 수렴한다", () => {
+  assert.match(page, /Chatbot request failed/);
+  assert.match(page, /요청을 처리하는 중 문제가 발생했습니다/);
+  assert.match(page, /finally/);
+  assert.match(page, /setIsTyping\(false\)/);
 });
 
 test("지원 범위를 벗어난 질문과 기사 본문 요청에는 안전한 다음 행동을 제시한다", () => {

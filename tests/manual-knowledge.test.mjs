@@ -27,6 +27,7 @@ test("manual KB contains v4.2 source and procedure chunks", () => {
     assert.ok(Number.isInteger(document.pdfPageStart));
     assert.ok(Number.isInteger(document.pdfPageEnd));
     assert.equal(document.source.document, "빅카인즈_사용자매뉴얼.pdf");
+    assert.match(document.source.url, /\/manual\/.*\.pdf$/);
     assert.ok(Array.isArray(document.capabilityIds));
     assert.ok(Array.isArray(document.cautions));
   }
@@ -50,6 +51,8 @@ test("manual chunks cover the required capability mapping", () => {
   }
   assert.deepEqual([...byId("manual-network-analysis").capabilityIds], ["NETWORK_ANALYSIS"]);
   assert.deepEqual([...byId("manual-regional-issue").capabilityIds], ["REGIONAL_ISSUE"]);
+  assert.equal(byId("manual-old-newspaper").pdfPageStart, 33);
+  assert.equal(byId("manual-search-operators").pdfPageStart, 44);
 });
 
 test("manual freshness-sensitive facts do not replace current canonical facts", () => {

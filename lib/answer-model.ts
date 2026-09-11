@@ -1,5 +1,6 @@
 import { formatAnswer } from "./answer-format";
 import type { SearchableDocument } from "./search";
+import { getDocumentSourceUrl } from "./source-link";
 
 export type AnswerAction = { type: "OPEN_URL" | "OPEN_QNA" | "OPEN_FAQ" | "OPEN_API" | "COPY_SEARCH_QUERY" | "APPLY_SEARCH_QUERY"; label: string; url?: string; value?: string };
 export type AnswerViewModel = {
@@ -27,7 +28,7 @@ export function buildAnswerViewModel(item: SearchableDocument): AnswerViewModel 
     actions: [],
     source: {
       label: item.source?.label || "빅카인즈 공식 자료",
-      url: item.source?.url,
+      url: getDocumentSourceUrl(item),
       effectiveDate: item.effectiveDate,
       authority: item.authority,
       status: item.status,

@@ -86,6 +86,28 @@ test("새 검색과 기능·진단·다운로드 요청의 경계를 지킨다",
   assert.equal(router.routeUserIntent("손흥민 오늘 골 넣었어?", routeContext(true)).intent, "OUT_OF_SCOPE");
 });
 
+test("검색식 사용법과 키워드 트렌드 요청을 검색식 생성과 구분한다", () => {
+  const guide = router.routeUserIntent("검색식 사용법을 알려줘", routeContext(false));
+  assert.equal(guide.intent, "SERVICE_GUIDE");
+
+  const build = router.routeUserIntent("AI AND 반도체 검색식 만들어줘", routeContext(false));
+  assert.equal(build.intent, "SEARCH_NEW");
+
+  const trend = router.routeUserIntent("빅카인즈에 대한 보도량 추이를 살펴보고 싶어요", routeContext(false));
+  assert.equal(trend.intent, "FEATURE_RECOMMENDATION");
+  assert.deepEqual(trend.capabilityIds, ["KEYWORD_TREND"]);
+});
+
+test("검색 목적의 문법적 연결어는 제거하되 고유명사는 보존한다", () => {
+  const search = router.routeUserIntent("공공기관 지방이전에 관한 뉴스 찾고 싶어요", routeContext(false));
+  assert.equal(search.intent, "SEARCH_NEW");
+  assert.equal(queryBuilder.buildSearchQuery(search.searchTurn.searchInput), "공공기관 AND 지방이전");
+  assert.equal(queryBuilder.buildSearchQuery(search.searchTurn.searchInput).includes("관한"), false);
+
+  const airline = router.routeUserIntent("대한항공 관련 뉴스를 찾고 싶어요", routeContext(false));
+  assert.equal(queryBuilder.buildSearchQuery(airline.searchTurn.searchInput), "대한항공");
+});
+
 test("검색식 만들기 문장의 지시어를 검색어로 포함하지 않는다", () => {
   const expression = intents.detectSearchExpressionIntent("인공지능과 반도체를 모두 포함한 검색식을 만들어줘");
   assert.equal(expression?.query, "인공지능 AND 반도체");

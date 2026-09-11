@@ -2,7 +2,7 @@
   const source = {
     label: "빅카인즈 사용자매뉴얼 v4.2",
     document: "빅카인즈_사용자매뉴얼.pdf",
-    url: "https://www.bigkinds.or.kr/v2/intro/index.do"
+    url: "https://www.bigkinds.or.kr/manual/%EB%B9%85%EC%B9%B4%EC%9D%B8%EC%A6%88_%EC%82%AC%EC%9A%A9%EC%9E%90%EB%A7%A4%EB%89%B4%EC%96%BC.pdf"
   };
 
   const manual = (document) => ({

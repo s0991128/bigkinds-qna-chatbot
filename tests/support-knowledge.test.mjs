@@ -22,6 +22,7 @@ test("support manual is a curated set and does not load the PDF", () => {
     assert.equal(document.revisionLabel, "v4.2");
     assert.equal(document.revisionDate, "2025-04-30");
     assert.equal(document.publishedRevisionDate, "2025-04-30");
+    assert.match(document.source.url, /\/manual\/.*\.pdf$/);
     assert.ok(document.title);
     assert.ok(document.issueKinds.length > 0);
     assert.ok(document.steps.length > 0);
