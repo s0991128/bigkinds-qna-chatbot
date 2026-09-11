@@ -1015,7 +1015,7 @@ export default function Home() {
       : "현재 검색식이나 찾으려는 주제를 알려주시면 결과를 좁히는 조건을 함께 정리해 드릴게요.";
     setMessages((current) => [...current, {
       id: nextId.current++, role: "assistant", text,
-      intent: "SEARCH_DIAGNOSIS", question,
+      intent: "SEARCH_RESULT_DIAGNOSIS", question,
       actions: [
         { id: "add-required", label: "반드시 포함할 단어 추가", type: "SET_MODE", value: "SEARCH_BUILD" },
         { id: "add-exact", label: "정확한 문구 지정", type: "SET_MODE", value: "SEARCH_BUILD" },
@@ -1672,7 +1672,10 @@ export default function Home() {
   }
 
   return (
-    <main className={embedded ? "site embedded" : "site"}>
+    <main
+      className={embedded ? "site embedded" : "site"}
+      data-qa-ready={dataReady && !isTyping ? "true" : "false"}
+    >
       {!embedded && (
         <>
           <div className="gov-strip">이 화면은 빅카인즈 웹사이트 부착형 챗봇의 구현 예시입니다.</div>
@@ -1789,7 +1792,7 @@ export default function Home() {
         </>
       )}
 
-      {(embedded || chatOpen) && <section className="chat-widget" aria-label="빅카인즈 이용 도우미 · Q&A">
+      {(embedded || chatOpen) && <section className="chat-widget" aria-label="빅카인즈 이용 도우미 · Q&A" data-qa="chat-widget">
         <header className="chat-header">
           <div className="bot-identity">
             <span className="bot-avatar">B</span>
@@ -1802,12 +1805,12 @@ export default function Home() {
             {answeredCount > 0 && (
               <button className="icon-button reset-button" type="button" onClick={resetConversation} aria-label="대화 초기화" title="대화 초기화">↻</button>
             )}
-            <button className="icon-button" type="button" onClick={handleCloseWidget} aria-label="챗봇 닫기">×</button>
+            <button className="icon-button" type="button" onClick={handleCloseWidget} aria-label="챗봇 닫기" data-qa="chat-close">×</button>
           </div>
         </header>
 
         <div className="topic-strip" aria-label="빠른 주제 선택">
-          <button type="button" onClick={() => setShowPurposeMenu((current) => !current)} aria-expanded={showPurposeMenu}>
+          <button type="button" onClick={() => setShowPurposeMenu((current) => !current)} aria-expanded={showPurposeMenu} data-qa="purpose-toggle">
             {showPurposeMenu ? "메뉴 접기" : "처음 메뉴"}
           </button>
           <button type="button" onClick={() => setShowQueryBuilder((current) => !current)} aria-expanded={showQueryBuilder}>
@@ -1818,7 +1821,7 @@ export default function Home() {
         {contextLabel && <p className="context-note" role="status">{contextLabel}</p>}
 
         {showPurposeMenu && (
-          <section className="purpose-panel" aria-label="도움이 필요한 목적 선택">
+          <section className="purpose-panel" aria-label="도움이 필요한 목적 선택" data-qa="purpose-menu">
             <div className="purpose-heading"><strong>어떤 도움이 필요하신가요?</strong><span>원하는 목적을 고르면 다음 단계부터 안내해 드립니다.</span></div>
             <div className="purpose-grid">
               {purposeMenu.map((item) => <button key={item.label} type="button" onClick={() => startMode(item.mode)} disabled={isTyping}><b>{item.label}</b><small>{item.description}</small></button>)}
@@ -1845,7 +1848,7 @@ export default function Home() {
         )}
 
         {showQueryBuilder && (
-          <section className="query-builder" aria-label="BIG KINDS 검색식 만들기">
+          <section className="query-builder" aria-label="BIG KINDS 검색식 만들기" data-qa="query-builder">
             <div className="query-builder-heading">
               <strong>추천 검색식</strong>
               <button type="button" onClick={() => setShowQueryBuilder(false)} aria-label="검색식 만들기 닫기">×</button>
@@ -1873,7 +1876,7 @@ export default function Home() {
           </section>
         )}
 
-        <div className="conversation" aria-live="polite">
+        <div className="conversation" aria-live="polite" data-qa="conversation">
           <div className="day-divider"><span>오늘</span></div>
           {messages.map((message) => {
             const matched = message.matchedId
@@ -1884,14 +1887,20 @@ export default function Home() {
               .filter(Boolean);
 
             return (
-              <div key={message.id} className={`message-row ${message.role}`}>
+              <div
+                key={message.id}
+                className={`message-row ${message.role}`}
+                data-qa={message.role === "assistant" ? "assistant-message" : "user-message"}
+                data-qa-intent={message.role === "assistant" ? message.intent || undefined : undefined}
+                data-qa-capability={message.capabilityId || undefined}
+              >
                 {message.role === "assistant" && <span className="message-avatar">B</span>}
                 <div className="message-stack">
                   <div className="bubble">
                     {matched && <span className="answer-label">{matched.category}</span>}
                     <p>{message.text}</p>
-                    {message.apiRedirect && <div className="api-redirect"><button type="button" onClick={() => emitHostAction({ type: "OPEN_URL", label: "뉴스토어 OPEN API 확인", url: OPEN_API_PURCHASE_URL })}>뉴스토어 OPEN API 확인 ↗</button></div>}
-                    {message.articleLookupCase && <div className="article-lookup-card"><strong>자료 찾기 조건</strong><dl>{[
+                    {message.apiRedirect && <div className="api-redirect"><button type="button" data-qa="action-button" data-qa-action="OPEN_API_REDIRECT" onClick={() => emitHostAction({ type: "OPEN_URL", label: "뉴스토어 OPEN API 확인", url: OPEN_API_PURCHASE_URL })}>뉴스토어 OPEN API 확인 ↗</button></div>}
+                    {message.articleLookupCase && <div className="article-lookup-card" data-qa="lookup-case" data-qa-lookup-status={message.lookupResultStatus || undefined}><strong>자료 찾기 조건</strong><dl>{[
                       ["기간", message.articleLookupCase.period.originalText || (message.articleLookupCase.period.from ? `${message.articleLookupCase.period.from} ~ ${message.articleLookupCase.period.to}` : "")],
                       ["언론사", message.articleLookupCase.media.join(", ")],
                       ["인물", message.articleLookupCase.persons.join(", ")],
@@ -1901,8 +1910,8 @@ export default function Home() {
                       ["지면 단서", message.articleLookupCase.pageHints.join(", ")],
                       ["자료 형태", materialTypeLabels[message.articleLookupCase.materialType]],
                     ].filter(([, value]) => value).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div>}
-                    {message.lookupStrategies && message.lookupStrategies.length > 0 && <div className="lookup-strategies"><strong>검색 전략</strong>{message.lookupStrategies.map((strategy, index) => <article key={strategy.id}><span>{index + 1}</span><div><b>{strategy.title}</b><p>{strategy.description}</p><code>{strategy.query}</code>{strategy.dateFrom && <small>기간 {strategy.dateFrom} ~ {strategy.dateTo}</small>}{strategy.media?.length ? <small>언론사 {strategy.media.join(", ")}</small> : null}{strategy.relatedSuggestions?.length ? <small>검색 범위를 넓히기 위한 관련 표현: {strategy.relatedSuggestions.join(", ")}</small> : null}<div><button type="button" onClick={() => copyText(strategy.query)}>검색식 복사</button><button type="button" onClick={() => embedded ? emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: strategy.query }) : emitHostAction({ type: "OPEN_URL", label: "BIGKinds 검색화면 열기", url: "https://www.bigkinds.or.kr/v2/news/search.do" })}>BIGKinds에서 검색</button><button type="button" onClick={() => applyLookupStrategy(strategy.id)}>이 전략 사용</button></div></div></article>)}</div>}
-                    {message.replyDraft && <div className="lookup-reply-draft"><strong>문의 회신 초안</strong><p>{message.replyDraft}</p><button type="button" onClick={() => copyText(message.replyDraft || "")}>초안 복사</button></div>}
+                    {message.lookupStrategies && message.lookupStrategies.length > 0 && <div className="lookup-strategies" data-qa="lookup-strategies"><strong>검색 전략</strong>{message.lookupStrategies.map((strategy, index) => <article key={strategy.id}><span>{index + 1}</span><div><b>{strategy.title}</b><p>{strategy.description}</p><code>{strategy.query}</code>{strategy.dateFrom && <small>기간 {strategy.dateFrom} ~ {strategy.dateTo}</small>}{strategy.media?.length ? <small>언론사 {strategy.media.join(", ")}</small> : null}{strategy.relatedSuggestions?.length ? <small>검색 범위를 넓히기 위한 관련 표현: {strategy.relatedSuggestions.join(", ")}</small> : null}<div><button type="button" data-qa="action-button" data-qa-action="COPY_QUERY" onClick={() => copyText(strategy.query)}>검색식 복사</button><button type="button" data-qa="action-button" data-qa-action="OPEN_SEARCH" onClick={() => embedded ? emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: strategy.query }) : emitHostAction({ type: "OPEN_URL", label: "BIGKinds 검색화면 열기", url: "https://www.bigkinds.or.kr/v2/news/search.do" })}>BIGKinds에서 검색</button><button type="button" data-qa="action-button" data-qa-action="USE_LOOKUP_STRATEGY" onClick={() => applyLookupStrategy(strategy.id)}>이 전략 사용</button></div></div></article>)}</div>}
+                    {message.replyDraft && <div className="lookup-reply-draft"><strong>문의 회신 초안</strong><p>{message.replyDraft}</p><button type="button" data-qa="action-button" data-qa-action="COPY_REPLY_DRAFT" onClick={() => copyText(message.replyDraft || "")}>초안 복사</button></div>}
                     {message.searchQuery && (
                       <div className="search-query-answer">
                         <strong>검색 조건을 이렇게 이해했습니다</strong>
@@ -1929,7 +1938,7 @@ export default function Home() {
                       </div>
                     )}
                     {message.searchDiagnosis && <div className="search-diagnosis"><strong>검색식 진단</strong><span>입력한 검색식</span><code>{message.searchDiagnosis.input}</code><span>권장 검색식</span><code>{message.searchDiagnosis.suggestion}</code><p>{message.searchDiagnosis.message}</p>{message.manualReference && <small className="authority-badge">{message.manualReference.label} 검색하기 {message.manualReference.section} 기준</small>}<div><button type="button" onClick={() => copyText(message.searchDiagnosis?.suggestion || "")}>수정 검색식 복사</button><button type="button" onClick={() => handleMessageAction({ id: "apply-diagnosis-inline", label: "수정 검색식 사용", type: "APPLY_SEARCH_DIAGNOSIS", value: message.searchDiagnosis?.suggestion })}>수정 검색식 사용</button></div></div>}
-                    {message.supportCase && <div className="support-case-card">
+                    {message.supportCase && <div className="support-case-card" data-qa="support-case" data-qa-support-issues={message.supportCase.issues.join(",")}>
                       <strong>{message.supportCase.issues.length > 1 ? "두 가지 문제가 함께 있는 것으로 보입니다." : "문의 내용을 이렇게 확인했습니다."}</strong>
                       <div className="support-issue-list">
                         {message.supportCase.issues.map((issue) => {
@@ -1944,7 +1953,7 @@ export default function Home() {
                             <span className="support-card-label">출처</span>
                             <a className="support-source" href={document?.source?.url || SUPPORT_QNA_URL} target="_blank" rel="noreferrer">{document?.source?.label || "빅카인즈 공식 Q&A"} ↗</a>
                             <span className="support-card-label">다음 행동</span>
-                            <div className="support-next-actions">{supportIssueActions(message.supportCase, issue, flow).map((action) => <button type="button" key={action.id} onClick={() => handleMessageAction(action)}>{action.label}</button>)}</div>
+                            <div className="support-next-actions">{supportIssueActions(message.supportCase, issue, flow).map((action) => <button type="button" data-qa="action-button" data-qa-action={action.type} key={action.id} onClick={() => handleMessageAction(action)}>{action.label}</button>)}</div>
                           </article>;
                         })}
                       </div>
@@ -1974,7 +1983,7 @@ export default function Home() {
                       </div>
                     )}
                     {message.diagnostic && <div className="diagnostic-flow"><strong>{message.diagnostic.title}</strong><div>{message.diagnostic.options.map((option) => <button type="button" key={option.label} onClick={() => ask(option.question)}>{option.label}</button>)}</div></div>}
-                    {message.actions && message.actions.length > 0 && <div className="message-actions" aria-label="다음 행동">{message.actions.map((action) => <button type="button" key={action.id} onClick={() => handleMessageAction(action)}>{action.label}</button>)}</div>}
+                    {message.actions && message.actions.length > 0 && <div className="message-actions" aria-label="다음 행동">{message.actions.map((action) => <button type="button" data-qa="action-button" data-qa-action={action.type} key={action.id} onClick={() => handleMessageAction(action)}>{action.label}</button>)}</div>}
                   </div>
 
                   {matched && (
@@ -2048,6 +2057,7 @@ export default function Home() {
           <label htmlFor="question">빅카인즈 이용 방법 질문</label>
           <div className="input-wrap">
             <input
+              data-qa="chat-input"
               id="question"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -2055,14 +2065,14 @@ export default function Home() {
               autoComplete="off"
               disabled={isTyping}
             />
-            <button type="submit" disabled={!query.trim() || isTyping} aria-label="질문 보내기">↑</button>
+            <button type="submit" data-qa="chat-send" disabled={!query.trim() || isTyping} aria-label="질문 보내기">↑</button>
           </div>
           <p className="disclaimer">빅카인즈 Q&amp;A는 저장된 공식 Q&amp;A·FAQ·소개·정책 문서를 기준으로 안내합니다.<br />정확한 정보와 최신 내용은 출처로 함께 제공되는 공식 원문을 확인해 주세요.</p>
           <p className="free-note">누구나 무료로 이용할 수 있습니다.</p>
         </form>
       </section>}
       {!embedded && !chatOpen && (
-        <button className="page-launcher" type="button" onClick={openChat} aria-label="빅카인즈 이용 도우미 열기">
+        <button className="page-launcher" type="button" data-qa="chat-launcher" onClick={openChat} aria-label="빅카인즈 이용 도우미 열기">
           B<span aria-hidden="true" />
         </button>
       )}

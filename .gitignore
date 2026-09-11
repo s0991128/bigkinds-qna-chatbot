@@ -39,6 +39,7 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+/artifacts/qa/
 
 # axhub import: local agent runtime state
 .axhub/

@@ -13,6 +13,7 @@
     "security:scan": "node scripts/security-scan.mjs",
     "test": "npm run security:scan && npm run build && node --test tests/*.test.mjs",
     "test:golden": "node --test tests/retrieval-quality.test.mjs tests/support-golden.test.mjs",
+    "qa:production": "node scripts/production-qa.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
