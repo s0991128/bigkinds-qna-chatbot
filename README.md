@@ -94,4 +94,4 @@ window.BIGKINDS_CHATBOT_ADAPTER = {
 };
 ```
 
-adapter가 없으면 `bigkinds-chatbot-action` CustomEvent가 발생하고, 사용자는 검색식 복사·뉴스검색 화면 열기 fallback을 사용할 수 있습니다. Q&A escalation 기본 주소는 `https://www.bigkinds.or.kr/news/qnaList.do`입니다.
+adapter가 없으면 검색식 적용 요청을 `jsonSearchParam` POST 형식으로 공식 뉴스 검색 화면에 전달하고, 그 외 동작은 `bigkinds-chatbot-action` CustomEvent로 전달합니다. Q&A escalation 기본 주소는 `https://www.bigkinds.or.kr/news/qnaList.do`입니다.

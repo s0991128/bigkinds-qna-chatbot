@@ -81,6 +81,41 @@
     if (iframe && iframe.contentWindow) iframe.contentWindow.postMessage({ type: "bigkinds-chatbot-context", context: pageContext() }, chatbotOrigin);
   }
 
+  function openBigKindsSearch(query) {
+    var searchKey = String(query || "").trim();
+    if (!searchKey) return;
+
+    var form = document.createElement("form");
+    form.method = "post";
+    form.action = "https://www.bigkinds.or.kr/v2/news/search.do";
+    form.target = "_blank";
+    form.acceptCharset = "UTF-8";
+    form.style.display = "none";
+
+    var input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "jsonSearchParam";
+    input.value = JSON.stringify({
+      indexName: "news",
+      searchKey: searchKey,
+      searchKeys: [{}],
+      searchFilterType: "1",
+      searchScopeType: "1",
+      searchSortType: "date",
+      sortMethod: "date",
+      startDate: "",
+      endDate: "",
+      providerCodes: [],
+      categoryCodes: [],
+      incidentCodes: [],
+      dateCodes: []
+    });
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+    window.setTimeout(function () { form.remove(); }, 0);
+  }
+
   function setOpen(open) {
     panel.classList.toggle("open", open);
     panel.setAttribute("aria-hidden", String(!open));
@@ -104,6 +139,10 @@
       var method = { APPLY_SEARCH_QUERY: "applySearchQuery", OPEN_URL: "openUrl", OPEN_QNA: "openQna", OPEN_FAQ: "openFaq", OPEN_API: "openApi" }[action.type];
       if (adapter && method && typeof adapter[method] === "function") {
         adapter[method](action.value || action.url || "");
+        return;
+      }
+      if (action.type === "APPLY_SEARCH_QUERY" && action.value) {
+        openBigKindsSearch(action.value);
         return;
       }
       if (action.type === "OPEN_URL" || action.type === "OPEN_QNA" || action.type === "OPEN_FAQ" || action.type === "OPEN_API") {

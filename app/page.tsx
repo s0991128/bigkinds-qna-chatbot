@@ -129,8 +129,66 @@ const dataScriptPaths = [
 ];
 
 const CHAT_TEASER_DISMISSED_KEY = "bigkinds-chat-teaser-dismissed";
+const CHAT_STARTED_KEY = "bigkinds-chat-started";
+
+function readChatStarted() {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(CHAT_STARTED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 const QNA_SOURCE_URL = "https://www.bigkinds.or.kr/news/qnaList.do";
+const BIGKINDS_SEARCH_URL = "https://www.bigkinds.or.kr/v2/news/search.do";
+
+function buildBigKindsSearchPayload(query: string) {
+  const searchKey = query.trim();
+  return {
+    indexName: "news",
+    searchKey,
+    searchKeys: [{}],
+    searchFilterType: "1",
+    searchScopeType: "1",
+    searchSortType: "date",
+    sortMethod: "date",
+    startDate: "",
+    endDate: "",
+    providerCodes: [],
+    categoryCodes: [],
+    incidentCodes: [],
+    dateCodes: [],
+  };
+}
+
+/**
+ * BIGKinds의 공식 검색 화면은 GET 쿼리스트링이 아니라
+ * `jsonSearchParam` POST 필드로 검색 상태를 받습니다.
+ * 독립 실행 화면에서도 이 계약을 그대로 사용해 검색어를 보존합니다.
+ */
+function openBigKindsSearch(query: string) {
+  if (typeof document === "undefined") return;
+  const searchKey = query.trim();
+  if (!searchKey) return;
+
+  const form = document.createElement("form");
+  form.method = "post";
+  form.action = BIGKINDS_SEARCH_URL;
+  form.target = "_blank";
+  form.acceptCharset = "UTF-8";
+  form.style.display = "none";
+
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = "jsonSearchParam";
+  input.value = JSON.stringify(buildBigKindsSearchPayload(searchKey));
+  form.appendChild(input);
+  document.body.appendChild(form);
+  form.submit();
+  window.setTimeout(() => form.remove(), 0);
+}
+
 const materialTypeLabels: Record<ArticleLookupCase["materialType"], string> = {
   ARTICLE: "기사",
   PAGE: "신문 지면",
@@ -294,6 +352,7 @@ export default function Home() {
   const [embedded, setEmbedded] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [showChatTeaser, setShowChatTeaser] = useState(false);
+  const [hasStartedChat, setHasStartedChat] = useState<boolean | null>(null);
   const [selectedKnowledgeType, setSelectedKnowledgeType] = useState<KnowledgeType | null>(null);
   const [showKnowledgeEvidence, setShowKnowledgeEvidence] = useState(false);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
@@ -383,6 +442,7 @@ export default function Home() {
     hydratedRef.current = true;
     chatOpenRef.current = isEmbed;
     startTransition(() => {
+      setHasStartedChat(readChatStarted());
       setEmbedded(isEmbed);
       setChatOpen(isEmbed);
       setShowRecommendations(true);
@@ -409,6 +469,7 @@ export default function Home() {
 
     const teaserTimer = !isEmbed ? window.setTimeout(() => {
       if (chatOpenRef.current) return;
+      if (readChatStarted()) return;
       try {
         if (window.sessionStorage.getItem(CHAT_TEASER_DISMISSED_KEY) === "1") return;
       } catch {
@@ -611,7 +672,17 @@ export default function Home() {
     setSelectedDocumentId(firstDocument?.id ?? null);
   }
 
+  function markChatStarted() {
+    setHasStartedChat(true);
+    try {
+      window.sessionStorage.setItem(CHAT_STARTED_KEY, "1");
+    } catch {
+      // sessionStorage can be unavailable in privacy-restricted contexts.
+    }
+  }
+
   function openChat() {
+    markChatStarted();
     chatOpenRef.current = true;
     setChatOpen(true);
     setShowChatTeaser(false);
@@ -635,6 +706,10 @@ export default function Home() {
 
   function emitHostAction(action: { type: string; label?: string; url?: string; value?: string }) {
     if (window.parent === window) {
+      if (action.type === "APPLY_SEARCH_QUERY" && action.value) {
+        openBigKindsSearch(action.value);
+        return;
+      }
       if (action.type === "OPEN_URL" && action.url) window.open(action.url, "_blank", "noopener,noreferrer");
       return;
     }
@@ -991,7 +1066,7 @@ export default function Home() {
     recordInsight({ eventType: "ARTICLE_LOOKUP_STRATEGY_USED", pageType: pageContext.pageType });
     setMessages((current) => [...current, {
       id: nextId.current++, role: "assistant",
-      text: `선택한 검색식: ${strategy.query}\nBIGKinds에서 검색한 뒤 결과 상태를 선택해 주세요.`,
+      text: `선택한 검색식: ${strategy.query}\n빅카인즈에서 검색한 뒤 결과 상태를 선택해 주세요.`,
       articleLookupCase,
       ...decisionMeta(),
       lookupStrategies: [strategy],
@@ -1018,7 +1093,7 @@ export default function Home() {
         ? "관련 자료를 찾으셨군요. 기사 제목·날짜·URL을 확인해 두면 후속 회신에 반영할 수 있습니다."
         : result === "CANDIDATE"
           ? "비슷한 자료는 확인됐지만 정확히 동일한 자료인지 추가 확인이 필요합니다."
-          : "현재 입력한 조건의 BIGKinds 검색에서는 요청 자료를 확인하지 못했습니다.",
+          : "현재 입력한 조건의 빅카인즈 검색에서는 요청 자료를 확인하지 못했습니다.",
       articleLookupCase,
       ...decisionMeta(),
       lookupResultStatus: result,
@@ -1104,7 +1179,7 @@ export default function Home() {
     else if (action.type === "GENERATE_LOOKUP_REPLY") showLookupReplyDraft();
     else if (action.type === "SHOW_LOOKUP_GUIDANCE") {
       recordInsight({ eventType: "ARTICLE_LOOKUP_ESCALATED", pageType: pageContext.pageType });
-      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "일반 기사 형태가 아니라 지면의 별도 명단·박스 자료일 가능성이 있습니다. BIGKinds는 협약 언론사로부터 제공받은 기사 데이터를 기반으로 하므로, 정확한 원지면 확인이 필요하면 해당 언론사에 해당 일자·지면의 열람 가능 여부를 문의할 수 있습니다.", intent: "HISTORICAL_ARTICLE_LOOKUP", ...engineAnswerMeta() }]);
+      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "일반 기사 형태가 아니라 지면의 별도 명단·박스 자료일 가능성이 있습니다. 빅카인즈는 협약 언론사로부터 제공받은 기사 데이터를 기반으로 하므로, 정확한 원지면 확인이 필요하면 해당 언론사에 해당 일자·지면의 열람 가능 여부를 문의할 수 있습니다.", intent: "HISTORICAL_ARTICLE_LOOKUP", ...engineAnswerMeta() }]);
     }
     else if (action.type === "COPY_QUERY" && action.value) void copyText(action.value);
     else if (action.type === "COPY_SUPPORT_REQUEST" && action.value) void copyText(action.value);
@@ -1632,7 +1707,7 @@ export default function Home() {
 
       const searchExpressionIntent = detectSearchExpressionIntent(cleanQuestion);
       if (searchExpressionIntent && !isOpenApiQuestion(cleanQuestion) && !isArticleContentQuestion(cleanQuestion) && !generalKnowledgeQuestion) {
-        if (renderSearchCoachMessage(searchExpressionIntent.input, cleanQuestion, "새로운 검색 주제로 이해했습니다. 요청하신 조건으로 BIG KINDS 검색식을 만들었습니다.", [], "NEW")) {
+        if (renderSearchCoachMessage(searchExpressionIntent.input, cleanQuestion, "새로운 검색 주제로 이해했습니다. 요청하신 조건으로 빅카인즈 검색식을 만들었습니다.", [], "NEW")) {
           setIsTyping(false);
           return;
         }
@@ -1946,7 +2021,7 @@ export default function Home() {
             <a className="site-brand" href={FAQ_SOURCE_URL} target="_blank" rel="noreferrer">
               <span className="brand-tile">B</span>
               <span>
-                <strong>BIG KINDS</strong>
+                <strong>빅카인즈</strong>
                 <small>뉴스빅데이터 분석서비스</small>
               </span>
             </a>
@@ -1959,10 +2034,10 @@ export default function Home() {
           <section className="demo-content">
             <div className="demo-copy">
               <section className="hero-panel" aria-labelledby="hero-title">
-                <p className="section-label">BIG KINDS · 이용 도우미</p>
-                <h1 id="hero-title">BIGKinds 이용을<br />필요한 순간에<br />도와드립니다.</h1>
+                <p className="section-label">빅카인즈 · 이용 도우미</p>
+                <h1 id="hero-title">빅카인즈 이용을<br />필요한 순간에<br />도와드립니다.</h1>
                 <p className="lead">검색식 작성, 분석 기능 추천,<br />과거 자료 찾기, 이용 문제 해결을<br />공식 근거와 AI를 활용해 안내합니다.</p>
-                <div className="hero-showcase-note"><strong>부착형 이용 도우미</strong><span>기존 BIGKinds 화면을 방해하지 않고 필요한 순간에 검색·분석·이용 방법을 안내합니다.</span></div>
+                <div className="hero-showcase-note"><strong>부착형 이용 도우미</strong><span>기존 빅카인즈 화면을 방해하지 않고 필요한 순간에 검색·분석·이용 방법을 안내합니다.</span></div>
                 <div className="hero-cta-row">
                   <button type="button" className="hero-cta primary" data-qa="hero-open-chat" onClick={openChat}>이용 도우미 열기 <span aria-hidden="true">→</span></button>
                   <button type="button" className="hero-cta" data-qa="hero-evidence" onClick={scrollToEvidence}>공식 근거 보기 <span aria-hidden="true">→</span></button>
@@ -1970,10 +2045,10 @@ export default function Home() {
               </section>
 
               <div className="metric-row" aria-label="공식 지식 문서 지표">
-                <div data-qa="metric-faq"><strong>{dataReady ? faqCount.toLocaleString("ko-KR") : "···"}</strong><span>공식 FAQ</span></div>
-                <div data-qa="metric-qna" aria-description="운영지원 공식 Q&A · 검토형 문서 포함"><strong>{dataReady ? qnaCount.toLocaleString("ko-KR") : "···"}</strong><span>공식 Q&amp;A</span><small>검토형 문서 포함</small></div>
+                <div data-qa="metric-faq"><strong>{dataReady ? faqCount.toLocaleString("ko-KR") : "···"}</strong><span>공식 FAQ</span><small>자주 묻는 질문</small></div>
+                <div data-qa="metric-qna" aria-description="운영지원 공식 Q&A · 검토형 문서 포함"><strong>{dataReady ? qnaCount.toLocaleString("ko-KR") : "···"}</strong><span>공식 Q&amp;A</span><small>운영지원 답변·검토 문서 포함</small></div>
                 <div data-qa="grounded-document-count" aria-description="현행성·답변 가능 조건을 통과한 문서"><strong>{dataReady ? groundedDocumentCount.toLocaleString("ko-KR") : "···"}</strong><span>직접 답변 가능 근거</span><small>현행성·답변 가능 조건 통과</small></div>
-                <div data-qa="metric-article-body"><strong>{dataReady ? storedArticleBodyCount.toLocaleString("ko-KR") : "···"}건</strong><span>기사 본문 저장</span></div>
+                <div data-qa="metric-article-body"><strong>{dataReady ? storedArticleBodyCount.toLocaleString("ko-KR") : "···"}건</strong><span>기사 본문 저장</span><small>기사 원문 검색·요약 미지원</small></div>
               </div>
               <details className="knowledge-evidence" data-qa="official-evidence" open={showKnowledgeEvidence} onToggle={(event) => setShowKnowledgeEvidence(event.currentTarget.open)}>
                 <summary>공식 근거 자세히 보기</summary>
@@ -2135,7 +2210,7 @@ export default function Home() {
         )}
 
         {showQueryBuilder && (
-          <section className="query-builder" aria-label="BIG KINDS 검색식 만들기" data-qa="query-builder">
+          <section className="query-builder" aria-label="빅카인즈 검색식 만들기" data-qa="query-builder">
             <div className="query-builder-heading">
               <strong>추천 검색식</strong>
               <button type="button" onClick={() => setShowQueryBuilder(false)} aria-label="검색식 만들기 닫기">×</button>
@@ -2159,7 +2234,7 @@ export default function Home() {
               <button type="button" disabled={!builtSearchQuery} onClick={() => copyText(builtSearchQuery)}>검색식 복사</button>
               <button type="button" onClick={() => emitHostAction({ type: "OPEN_URL", label: "뉴스검색 화면 열기", url: "https://www.bigkinds.or.kr/v2/news/search.do" })}>뉴스검색 화면 열기</button>
             </div>
-            <small>BIG KINDS 검색연산자는 AND, OR, NOT을 대문자로 입력합니다.</small>
+            <small>빅카인즈 검색연산자는 AND, OR, NOT을 대문자로 입력합니다.</small>
           </section>
         )}
 
@@ -2206,7 +2281,7 @@ export default function Home() {
                       ["지면 단서", message.articleLookupCase.pageHints.join(", ")],
                       ["자료 형태", materialTypeLabels[message.articleLookupCase.materialType]],
                     ].filter(([, value]) => value).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div>}
-                    {message.lookupStrategies && message.lookupStrategies.length > 0 && <div className="lookup-strategies" data-qa="lookup-strategies"><strong>검색 전략</strong>{message.lookupStrategies.map((strategy, index) => <article key={strategy.id}><span>{index + 1}</span><div><b>{strategy.title}</b><p>{strategy.description}</p><code>{strategy.query}</code>{strategy.dateFrom && <small>기간 {strategy.dateFrom} ~ {strategy.dateTo}</small>}{strategy.media?.length ? <small>언론사 {strategy.media.join(", ")}</small> : null}{strategy.relatedSuggestions?.length ? <small>검색 범위를 넓히기 위한 관련 표현: {strategy.relatedSuggestions.join(", ")}</small> : null}<div><button type="button" data-qa="action-button" data-qa-action="COPY_QUERY" onClick={() => copyText(strategy.query)}>검색식 복사</button><button type="button" data-qa="action-button" data-qa-action="OPEN_SEARCH" onClick={() => embedded ? emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: strategy.query }) : emitHostAction({ type: "OPEN_URL", label: "BIGKinds 검색화면 열기", url: "https://www.bigkinds.or.kr/v2/news/search.do" })}>BIGKinds에서 검색</button><button type="button" data-qa="action-button" data-qa-action="USE_LOOKUP_STRATEGY" onClick={() => applyLookupStrategy(strategy.id)}>이 전략 사용</button></div></div></article>)}</div>}
+                    {message.lookupStrategies && message.lookupStrategies.length > 0 && <div className="lookup-strategies" data-qa="lookup-strategies"><strong>검색 전략</strong>{message.lookupStrategies.map((strategy, index) => <article key={strategy.id}><span>{index + 1}</span><div><b>{strategy.title}</b><p>{strategy.description}</p><code>{strategy.query}</code>{strategy.dateFrom && <small>기간 {strategy.dateFrom} ~ {strategy.dateTo}</small>}{strategy.media?.length ? <small>언론사 {strategy.media.join(", ")}</small> : null}{strategy.relatedSuggestions?.length ? <small>검색 범위를 넓히기 위한 관련 표현: {strategy.relatedSuggestions.join(", ")}</small> : null}<div><button type="button" data-qa="action-button" data-qa-action="COPY_QUERY" onClick={() => copyText(strategy.query)}>검색식 복사</button><button type="button" data-qa="action-button" data-qa-action="OPEN_SEARCH" onClick={() => emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "빅카인즈 검색화면 열기", value: strategy.query })}>빅카인즈에서 검색</button><button type="button" data-qa="action-button" data-qa-action="USE_LOOKUP_STRATEGY" onClick={() => applyLookupStrategy(strategy.id)}>이 전략 사용</button></div></div></article>)}</div>}
                     {message.replyDraft && <div className="lookup-reply-draft"><strong>문의 회신 초안</strong><p>{message.replyDraft}</p><button type="button" data-qa="action-button" data-qa-action="COPY_REPLY_DRAFT" onClick={() => copyText(message.replyDraft || "")}>초안 복사</button></div>}
                     {message.searchQuery && (
                       <div className="search-query-answer">
@@ -2380,14 +2455,14 @@ export default function Home() {
             </div>
             <nav className="kpf-footer-links" aria-label="공식 사이트 링크">
               <a href="https://www.kpf.or.kr/" target="_blank" rel="noreferrer">한국언론진흥재단 ↗</a>
-              <a href="https://www.bigkinds.or.kr/" target="_blank" rel="noreferrer">BIGKinds ↗</a>
+              <a href="https://www.bigkinds.or.kr/" target="_blank" rel="noreferrer">빅카인즈 ↗</a>
             </nav>
           </div>
           <div className="kpf-footer-bottom">
             <span>서울특별시 중구 세종대로 124</span>
             <span>Copyright © KOREA PRESS FOUNDATION. ALL RIGHTS RESERVED.</span>
           </div>
-          <small>BIGKinds Support Copilot · AX PoC</small>
+          <small>빅카인즈 Q&amp;A · AX PoC</small>
         </footer>
       )}
       {!embedded && !chatOpen && showChatTeaser && (
@@ -2395,14 +2470,14 @@ export default function Home() {
           <button className="chat-teaser-main" type="button" data-qa="chat-teaser-main" onClick={openChat}>
             <span>
               <strong>사용 중 불편한 점이 있나요?</strong>
-              <span className="chat-teaser-subline"><span className="chat-teaser-accent" aria-hidden="true">⚡</span>빠르게 답변 받을 수 있어요</span>
+              <span className="chat-teaser-subline"><svg className="chat-teaser-accent" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.4 2 4 13.2h6.7L9.8 22 20 9.8h-6.8L13.4 2Z" /></svg>빠르게 답변 받을 수 있어요</span>
             </span>
           </button>
           <button className="chat-teaser-close" type="button" data-qa="chat-teaser-close" onClick={(event) => { event.stopPropagation(); dismissChatTeaser(); }} aria-label="안내 말풍선 닫기">×</button>
         </div>
       )}
       {!embedded && !chatOpen && (
-        <button className="page-launcher" type="button" data-qa="chat-launcher" onClick={openChat} aria-label="빅카인즈 이용 도우미 열기">
+        <button className={`page-launcher${hasStartedChat === false ? " chat-launcher--glow" : ""}`} type="button" data-qa="chat-launcher" onClick={openChat} aria-label="빅카인즈 이용 도우미 열기">
           B<span className="launcher-tooltip" aria-hidden="true">이용 도우미</span>
         </button>
       )}

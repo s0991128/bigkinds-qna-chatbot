@@ -56,12 +56,12 @@ export default function HistoryPage() {
   return (
     <main className="history-page">
       <header className="history-header">
-        <a className="site-brand" href="/"><span className="brand-tile">B</span><span><strong>BIG KINDS</strong><small>뉴스빅데이터 분석서비스</small></span></a>
+        <a className="site-brand" href="/"><span className="brand-tile">B</span><span><strong>빅카인즈</strong><small>뉴스빅데이터 분석서비스</small></span></a>
         <a className="back-link" href="/">← 챗봇으로 돌아가기</a>
       </header>
       <section className="history-content">
         <div className="history-title-row">
-          <div><p className="section-label">BIG KINDS · 대화 기록</p><h1>대화 기록</h1><p>이 브라우저 기기에서 나눈 빅카인즈 Q&amp;A 대화를 확인할 수 있습니다.</p></div>
+          <div><p className="section-label">빅카인즈 · 대화 기록</p><h1>대화 기록</h1><p>이 브라우저 기기에서 나눈 빅카인즈 Q&amp;A 대화를 확인할 수 있습니다.</p></div>
           <div className="history-actions"><button className="export-history" type="button" onClick={exportHistory} disabled={!hasHistory}>CSV 내보내기</button><button className="clear-history" type="button" onClick={clearHistory} disabled={!hasHistory}>기록 지우기</button></div>
         </div>
         <p className="history-storage-note">대화기록은 서버로 보내지 않고 이 브라우저 기기에 최대 30일간 저장됩니다.</p>

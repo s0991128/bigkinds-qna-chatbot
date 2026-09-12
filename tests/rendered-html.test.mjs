@@ -22,7 +22,7 @@ test("server-renders the BIGKinds chatbot shell", async () => {
   const html = await response.text();
   assert.match(html, /빅카인즈 이용 도우미/);
   assert.match(html, /<strong>···<\/strong><span>공식 FAQ/);
-  assert.match(html, /BIGKinds 이용을/);
+  assert.match(html, /빅카인즈 이용을/);
   assert.doesNotMatch(html, /hero-question-input|quick-start/);
   assert.match(html, /저장된 공식 문서를 기준으로 안내합니다/);
   assert.match(html, /누구나 무료로 이용할 수 있습니다/);
@@ -35,7 +35,7 @@ test("embed route renders the same chatbot without demo chrome", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /빅카인즈 이용 도우미/);
-  assert.match(html, /dataScriptPaths|BIG KINDS|빅카인즈 이용/);
+  assert.match(html, /dataScriptPaths|빅카인즈|빅카인즈 이용/);
 });
 
 test("upstream source snapshot and widget assets are present", async () => {

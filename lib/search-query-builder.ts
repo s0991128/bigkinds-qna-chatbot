@@ -72,5 +72,5 @@ export function describeSearchQuery(input: SearchQueryInput) {
   if (exact.length) sentences.push(`${exact.map((term) => `“${term}”`).join(", ")} 문구를 그대로 포함하고`);
   if (exclude.length) sentences.push(`${exclude.join(", ")}이(가) 포함된 기사는 제외합니다.`);
   if (sentences.length && !sentences.at(-1)?.endsWith(".")) sentences[sentences.length - 1] += ".";
-  return sentences.join(" ") || "조건을 입력하면 BIGKinds 검색식을 만들어 드립니다.";
+  return sentences.join(" ") || "조건을 입력하면 빅카인즈 검색식을 만들어 드립니다.";
 }

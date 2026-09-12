@@ -51,7 +51,7 @@ export default function InsightsPage() {
     ["LLM Rerank", counts.RECOMMENDATION_LLM_RERANK || 0],
   ] as const;
   return <main className="insights-page">
-    <header className="insights-header"><Link href="/">← 챗봇으로 돌아가기</Link><span>BIGKinds Copilot PoC</span></header>
+    <header className="insights-header"><Link href="/">← 챗봇으로 돌아가기</Link><span>빅카인즈 Q&amp;A · PoC</span></header>
     <section className="insights-content">
       <p className="section-label">운영 인사이트</p>
       <h1>반복되는 문의와 병목을 확인하세요</h1>
