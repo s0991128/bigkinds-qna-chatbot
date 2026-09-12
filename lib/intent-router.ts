@@ -7,6 +7,7 @@ import {
   isChatbotMetaQuestion,
   isClearlyOutOfScopeQuestion,
   isFeatureRecommendationQuestion,
+  isFullTextDownloadQuestion,
   isLikelyGeneralKnowledgeQuestion,
   isOpenApiQuestion,
   isSearchDiagnosisQuestion,
@@ -66,6 +67,7 @@ export function routeUserIntent(question: string, context: IntentRouteContext): 
   const lookupUpdate = Boolean(context.hasArticleLookupContext && isArticleLookupUpdateQuestion(clean));
   if (isOpenApiQuestion(clean)) return { intent: "OPEN_API_REDIRECT" };
   if (sensitivePattern.test(clean) && !historicalLookup && !lookupUpdate) return { intent: "CLARIFY", sensitive: true };
+  if (isFullTextDownloadQuestion(clean)) return { intent: "SERVICE_FACT" };
   const supportIssues = detectSupportIssues(clean);
   const onlyLegacySearchNoResult = supportIssues.length === 1 && supportIssues[0] === "SEARCH_NO_RESULT";
   if (supportIssues.length && !onlyLegacySearchNoResult) return { intent: "SUPPORT_TRIAGE", supportIssues };

@@ -36,6 +36,20 @@ export default function InsightsPage() {
     ["OPEN API 이관", counts.OPEN_API_REDIRECT || 0],
     ["Gemini fallback", counts.GEMINI_UNAVAILABLE || 0],
   ] as const;
+  const decisionCards = [
+    ["Hard Rule", counts.ROUTE_HARD_RULE || 0],
+    ["Deterministic", counts.ROUTE_DETERMINISTIC || 0],
+    ["Knowledge", counts.ROUTE_KNOWLEDGE || 0],
+    ["LLM", counts.ROUTE_LLM || 0],
+  ] as const;
+  const answerCards = [
+    ["Internal Engine", counts.ANSWER_INTERNAL_ENGINE || 0],
+    ["LLM Generated", counts.ANSWER_LLM_GENERATED || 0],
+  ] as const;
+  const recommendationCards = [
+    ["Context Rule", counts.RECOMMENDATION_CONTEXT_RULE || 0],
+    ["LLM Rerank", counts.RECOMMENDATION_LLM_RERANK || 0],
+  ] as const;
   return <main className="insights-page">
     <header className="insights-header"><Link href="/">← 챗봇으로 돌아가기</Link><span>BIGKinds Copilot PoC</span></header>
     <section className="insights-content">
@@ -43,6 +57,18 @@ export default function InsightsPage() {
       <h1>반복되는 문의와 병목을 확인하세요</h1>
       <p className="insights-description">질문 원문은 저장하지 않고, 익명 이벤트 수만 이 브라우저에 기록합니다.</p>
       <div className="insights-grid">{cards.map(([label, value]) => <article key={label}><strong>{value}</strong><span>{label}</span></article>)}</div>
+      <section className="insights-breakdown" aria-labelledby="decision-insights-title">
+        <div><p className="section-label">ROUTING</p><h2 id="decision-insights-title">판단 방식</h2></div>
+        <div className="insights-mini-grid">{decisionCards.map(([label, value]) => <article key={label}><strong>{value}</strong><span>{label}</span></article>)}</div>
+      </section>
+      <section className="insights-breakdown" aria-labelledby="answer-origin-title">
+        <div><p className="section-label">PROVENANCE</p><h2 id="answer-origin-title">답변 생성 방식</h2></div>
+        <div className="insights-mini-grid">{answerCards.map(([label, value]) => <article key={label}><strong>{value}</strong><span>{label}</span></article>)}</div>
+      </section>
+      <section className="insights-breakdown" aria-labelledby="recommendation-source-title">
+        <div><p className="section-label">RECOMMENDATION</p><h2 id="recommendation-source-title">추천 결정 방식</h2></div>
+        <div className="insights-mini-grid">{recommendationCards.map(([label, value]) => <article key={label}><strong>{value}</strong><span>{label}</span></article>)}</div>
+      </section>
     </section>
   </main>;
 }

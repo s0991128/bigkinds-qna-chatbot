@@ -21,6 +21,15 @@ function normalizeTerm(term: string) {
   return term.replace(/^[\s\(\[“”'\"]+|[\s\)\]“”'\"]+$/g, "").trim();
 }
 
+/** 검색 플랫폼을 뜻하는 문맥만 제거하고, 검색 주제로 쓰인 BIGKinds는 보존합니다. */
+export function stripSearchPlatformContext(value: string) {
+  return value
+    .replace(/(?:빅\s*카인즈|big\s*kinds)\s*(?:사이트\s*)?(?:에서|내에서)/gi, " ")
+    .replace(/(?:빅\s*카인즈|big\s*kinds)\s*(?:을|를)?\s*통해(?:서)?/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function extractQuotedTerms(question: string) {
   return [...question.matchAll(/[\"“]([^\"”]+)[\"”]/g)].map((match) => normalizeTerm(match[1] || "")).filter(Boolean);
 }
@@ -44,14 +53,15 @@ function extractTerms(candidate: string) {
 
 export function detectSearchExpressionIntent(question: string): SearchExpressionIntent | null {
   if (!requestPattern.test(question)) return null;
-  const exact = extractQuotedTerms(question);
-  const excludeMatch = question.match(/([가-힣A-Za-z0-9]+(?:\s*(?:과|와|및|또는)\s*[가-힣A-Za-z0-9]+)?)\s*(?:은|는|을|를)?\s*(?:제외|빼고|말고|not)(?:하는|한)?/i);
+  const searchQuestion = stripSearchPlatformContext(question);
+  const exact = extractQuotedTerms(searchQuestion);
+  const excludeMatch = searchQuestion.match(/([가-힣A-Za-z0-9]+(?:\s*(?:과|와|및|또는)\s*[가-힣A-Za-z0-9]+)?)\s*(?:은|는|을|를)?\s*(?:제외|빼고|말고|not)(?:하는|한)?/i);
   const excludeClause = excludeMatch?.[1]?.trim() || "";
-  const includeClause = excludeMatch ? question.replace(excludeMatch[0], " ") : question;
+  const includeClause = excludeMatch ? searchQuestion.replace(excludeMatch[0], " ") : searchQuestion;
   const terms = extractTerms(extractCandidate(includeClause));
   const exclude = extractTerms(excludeClause.replace(/^(?:을|를)?\s*/i, ""));
   if (!terms.length && !exact.length) return null;
-  const any = /(?:또는|or|중\s*하나)/i.test(question) ? terms : [];
+  const any = /(?:또는|or|중\s*하나)/i.test(searchQuestion) ? terms : [];
   const all = any.length ? [] : terms;
   const input = normalizeSearchInput({ any, all, exact, exclude });
   const query = buildSearchQuery(input);
@@ -89,7 +99,7 @@ export function isSearchUsageQuestion(question: string) {
 const simpleSearchStopWords = new Set([
   "기사", "기사만", "뉴스", "뉴스만", "보도", "관련", "관련된", "어떤", "서로", "내용", "주제", "주제의",
   "찾고", "찾아", "찾아줘", "찾고싶어", "찾고싶어요", "싶어요", "싶어", "싶습니다", "보고", "보고싶어",
-  "검색", "검색하고", "검색해", "해주세요", "해줘", "좀", "원해", "원해요", "들어가고", "들어가는",
+  "검색", "검색하고", "검색해", "검색해줘", "검색해주세요", "검색해요", "해주세요", "해줘", "좀", "원해", "원해요", "들어가고", "들어가는",
   "들어간", "포함", "포함한", "포함하는", "포함된", "포함하고", "있는", "있고", "들어", "을", "를", "이", "가", "은", "는", "과", "와", "및", "이나", "나",
   "중", "하나", "하나가", "하나만", "둘", "하나면", "들어가면", "관련해", "넣어", "넣어줘", "넣어주세요", "추가", "추가해", "추가해줘", "추가해주세요", "꼭", "들어가야", "해", "돼", "되", "정확히",
   "포함해", "포함해줘", "포함해주세요", "같이", "함께", "빼줘", "제외해줘", "제외해", "없애줘", "언급되는지", "보고싶어",
@@ -125,8 +135,9 @@ export function isSearchGoalQuestion(question: string): boolean {
 
 export function extractSimpleSearchGoal(question: string): SearchQueryInput | null {
   if (!isSearchGoalQuestion(question)) return null;
-  const exact = extractQuotedTerms(question);
-  const withoutExact = question.replace(/["“][^"”]+["”]/g, " ").replace(discourseMarkerPattern, "");
+  const searchQuestion = stripSearchPlatformContext(question);
+  const exact = extractQuotedTerms(searchQuestion);
+  const withoutExact = searchQuestion.replace(/["“][^"”]+["”]/g, " ").replace(discourseMarkerPattern, "");
   const excludeMatch = withoutExact.match(/([가-힣A-Za-z0-9]+(?:\s*(?:과|와|및|또는)\s*[가-힣A-Za-z0-9]+)?)\s*(?:은|는|을|를)?\s*(?:제외|제외해|제외해주세요|빼고|빼줘|빼주세요|말고)/i);
   const exclude = excludeMatch ? simpleSearchTerms(excludeMatch[1] || "") : [];
   const includeClause = excludeMatch ? withoutExact.replace(excludeMatch[0], " ") : withoutExact;
@@ -147,17 +158,25 @@ export function isServiceOverviewQuestion(question: string) {
   return /빅카인즈.{0,18}(?:소개|뭐야|무엇|어떤\s*서비스|뭘?\s*할\s*수\s*있|무슨\s*기능|기능이\s*있)|(?:빅카인즈|서비스).{0,18}(?:알려줘|소개해)/i.test(question);
 }
 
+export function isFullTextDownloadQuestion(question: string) {
+  const hasFullTextCue = /(?:기사|뉴스).{0,16}(?:전체|전문|본문)|(?:전체|전문|본문).{0,16}(?:기사|뉴스)|(?:원문|본문)\s*(?:전체|전문)/i.test(question);
+  const hasDownloadCue = /다운로드|내려받|엑셀|excel|csv|파일|받(?:을|고|아|을\s*수)|저장/i.test(question);
+  return hasFullTextCue && hasDownloadCue;
+}
+
 export function isServiceGuideQuestion(question: string) {
   if (/(?:관계도.*연관어|연관어.*관계도|관계도.*차이|연관어.*차이)/i.test(question)) return false;
   if (/(?:내\s*)?엑셀\s*데이터.{0,16}(?:그래프|차트|시각화)|(?:그래프|차트|시각화).{0,16}(?:내\s*)?엑셀\s*데이터/i.test(question)) return false;
+  if (isFullTextDownloadQuestion(question)) return false;
   const download = /다운로드|내려받|엑셀|excel|csv|파일|저장|받을\s*수/i.test(question);
   const usage = /검색\s*기간|언론사.{0,8}(?:선택|고르)|형태소\s*분석|개체명\s*분석|관계도\s*분석|연관어\s*분석|어떻게\s*(?:써|사용|이용|해)/i.test(question);
+  const audioUsage = /(?:뉴스\s*듣기|오디오|음성|낭독).{0,16}(?:어디|이용|사용|방법)|(?:어디|이용|사용|방법).{0,16}(?:뉴스\s*듣기|오디오|음성|낭독)/i.test(question);
   const searchOperatorUsage = /(?:검색식|검색\s*문법|검색\s*연산자|검색어\s*조합|\bAND\b|\bOR\b|\bNOT\b)/i.test(question)
     && /사용법|문법|연산자|조합\s*방법|어떻게\s*(?:써|사용|조합)|알려/i.test(question)
     && !requestPattern.test(question);
   const manualFeature = /키워드\s*트렌드|정보\s*추출|시각화|보고서|지역이슈|최신뉴스|주간\s*이슈|고신문|인용문|검색식.{0,12}저장|스크랩|나의\s*(?:뉴스|분석)/i.test(question);
   const asksForLocationOrSteps = /(?:어디서|어디에|어디|방법|순서|사용|이용|눌러|할\s*수)/i.test(question);
-  return download || usage || searchOperatorUsage || (manualFeature && asksForLocationOrSteps);
+  return download || usage || audioUsage || searchOperatorUsage || (manualFeature && asksForLocationOrSteps);
 }
 
 export function isServiceFactQuestion(question: string) {

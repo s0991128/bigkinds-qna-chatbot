@@ -46,10 +46,10 @@ export function createPageContext(pathname: string, loggedIn: boolean | null = n
 }
 
 export const pageTypeLabels: Partial<Record<PageType, string>> = {
-  HOME: "빅카인즈 홈 화면을 보고 계시네요.",
-  NEWS_SEARCH: "뉴스 검색·분석 화면을 보고 계시네요.",
+  HOME: "BIGKinds 이용을 도와드릴게요.",
+  NEWS_SEARCH: "뉴스 검색 화면을 보고 계시네요.",
   MORPHEME_ANALYSIS: "형태소·개체명 분석 화면을 보고 계시네요.",
-  VISUALIZATION: "분석결과 시각화 화면을 보고 계시네요.",
+  VISUALIZATION: "분석결과 화면을 보고 계시네요.",
   REGIONAL_ISSUE: "지역이슈분석 화면을 보고 계시네요.",
   LATEST_NEWS: "최신뉴스 화면을 보고 계시네요.",
   WEEKLY_ISSUE: "주간이슈 화면을 보고 계시네요.",

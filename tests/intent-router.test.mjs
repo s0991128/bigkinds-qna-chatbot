@@ -114,6 +114,25 @@ test("검색식 만들기 문장의 지시어를 검색어로 포함하지 않�
   assert.equal(expression?.query.includes("모두"), false);
 });
 
+test("검색 플랫폼 문맥은 제거하되 실제 BIGKinds 검색 주제는 보존한다", () => {
+  const cases = [
+    ["빅카인즈에서 이재명 관련된 기사를 찾고 싶어", "이재명"],
+    ["BIG KINDS에서 이재명 기사를 찾아줘", "이재명"],
+    ["빅카인즈를 통해 이재명 관련 뉴스를 찾고 싶어", "이재명"],
+    ["빅카인즈를 통해 이재명 기사를 검색해줘", "이재명"],
+    ["빅카인즈 관련 기사를 찾아줘", "빅카인즈"],
+    ["빅카인즈에서 빅카인즈 관련 기사를 찾아줘", "빅카인즈"],
+  ];
+  for (const [question, expected] of cases) {
+    const result = router.routeUserIntent(question, routeContext(false));
+    assert.equal(result.intent, "SEARCH_NEW", question);
+    assert.equal(queryBuilder.buildSearchQuery(result.searchTurn.searchInput), expected, question);
+  }
+  assert.equal(router.routeUserIntent("빅카인즈에 대한 보도량 추이를 보고 싶어", routeContext(false)).intent, "FEATURE_RECOMMENDATION");
+  assert.deepEqual(router.routeUserIntent("빅카인즈에 대한 보도량 추이를 보고 싶어", routeContext(false)).capabilityIds, ["KEYWORD_TREND"]);
+  assert.equal(intents.detectSearchExpressionIntent("빅카인즈에서 이재명 검색식 만들어줘")?.query, "이재명");
+});
+
 test("Q1-Q10은 서비스 우선 라우팅과 PROPOSED 검색 컨텍스트를 지킨다", () => {
   const initialContext = context.emptySearchContext();
   const now = new Date().toISOString();

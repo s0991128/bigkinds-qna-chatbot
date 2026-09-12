@@ -49,6 +49,20 @@ export function isAnswerableDocument(document: SearchableDocument) {
     && ["CURRENT_CANONICAL", "CURRENT_OFFICIAL_INTRO", "CURRENT_OFFICIAL_GUIDE", "CURRENT_GUIDE", "CURRENT_POLICY", "USER_MANUAL_V4_2", "OFFICIAL_FAQ", "VERIFIED_QNA"].includes(document.authority ?? "");
 }
 
+/**
+ * 화면에 표시할 수 있는 공식 근거 문서 수를 계산합니다.
+ * 중복 ID는 한 번만 세고, 검색 답변에 사용할 수 없는 문서는 제외합니다.
+ */
+export function countOfficialGroundedDocuments(documents: SearchableDocument[]) {
+  const seen = new Set<string>();
+  return documents.reduce((count, document) => {
+    const id = document.id.trim();
+    if (!id || seen.has(id) || !isAnswerableDocument(document)) return count;
+    seen.add(id);
+    return count + 1;
+  }, 0);
+}
+
 export const authorityPrecedence: Record<NonNullable<SearchableDocument["authority"]>, number> = {
   HISTORICAL_QNA: 0,
   VERIFIED_QNA: 10,

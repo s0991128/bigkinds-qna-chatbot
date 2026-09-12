@@ -1,13 +1,15 @@
 import { SUPPORT_ISSUE_KINDS, SupportIssueKind } from "./support-case";
 
-const problemCue = /안\s*(?:돼|되|나와|나오|보여|열려|됨)|않|오류|에러|실패|문제|이상|막혀|작동|반응|못\s*(?:찾|받|로그인|재생)|0\s*건|없어|안\s*옴|안\s*와|끊겨|멈춰/i;
+const problemCue = /안\s*(?:돼|되|나와|나오|보여|열려|됨|눌려)|않|오류|에러|실패|문제|이상|막혀|작동|반응|클릭|못\s*(?:찾|받|로그인|재생)|0\s*건|없어|안\s*옴|안\s*와|끊겨|멈춰/i;
+const downloadCue = /다운로드|내려받|엑셀|excel|csv|파일\s*(?:받|저장|열)/i;
+const downloadProblemCue = /안\s*(?:돼|되|나와|나오|보여|열려|됨)|않|오류|에러|실패|문제|이상|막혀|작동|반응|못\s*(?:받|열)|열리지|깨져|끊겨|멈춰|0\s*건/i;
 const rightsCue = /저작권|이용권|라이선스|라이센스|사용권|복제|배포|상업적\s*이용|유료\s*(?:회원|서비스|제공)|원문\s*(?:을|이|은|의)?\s*(?:이용|제공|다운로드)|(?:AI|인공지능)\s*(?:학습|재이용|재사용|가공|배포)|(?:AI|인공지능)\s*요약.{0,20}(?:제공|판매|배포|서비스화|유료)|(?:제공|판매|배포|서비스화|유료).{0,20}(?:AI|인공지능)\s*요약/i;
 const researchCue = /(?:비영리\s*)?연구\s*(?:목적|용|에\s*사용|에서|로)|논문|학술|인용|출처\s*(?:표기|기재)|연구자|연구\s*자료/i;
 
 const detectors: Array<[SupportIssueKind, RegExp, boolean]> = [
   ["SEARCH_NO_RESULT", /검색결과|검색\s*결과|검색어|뉴스\s*검색/i, true],
   ["SEARCH_FILTER_PROBLEM", /필터|검색\s*조건|검색기간|기간\s*(?:은|는|이|가|도)?\s*(?:설정|필터|선택)|언론사\s*(?:선택|필터)|정렬|조건/i, true],
-  ["DOWNLOAD_PROBLEM", /다운로드|내려받|엑셀|excel|csv|파일s*(?:받|저장|열)/i, true],
+  ["DOWNLOAD_PROBLEM", downloadCue, true],
   ["AUDIO_PLAYBACK_PROBLEM", /오디오|음성|듣기|재생|소리|낭독/i, true],
   ["MEMBERSHIP_EMAIL_PROBLEM", /회원가입|가입\s*(?:메일|이메일)|인증\s*메일|인증메일|이메일.{0,12}(?:변경|인증|수신|가입|다시)|가입.{0,12}이메일|메일\s*(?:안|못|오류|수신)|로그인\s*메일/i, true],
   ["ACCOUNT_PROBLEM", /로그인|계정|회원|가입|비밀번호|탈퇴|인증|접속/i, true],
@@ -17,6 +19,7 @@ const detectors: Array<[SupportIssueKind, RegExp, boolean]> = [
 
 function isIssueMatch(question: string, kind: SupportIssueKind, pattern: RegExp, requiresProblemCue: boolean) {
   if (!pattern.test(question)) return false;
+  if (kind === "DOWNLOAD_PROBLEM") return downloadCue.test(question) && downloadProblemCue.test(question);
   if (!requiresProblemCue) return true;
   return problemCue.test(question);
 }

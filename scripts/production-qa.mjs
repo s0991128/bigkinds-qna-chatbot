@@ -334,6 +334,13 @@ async function prepare(page) {
   await page.waitFor("document.querySelector('[data-qa=\\\"chat-widget\\\"]') !== null", 10000, "chat widget");
 }
 
+async function closeChat(page) {
+  if (await page.exists('[data-qa="chat-close"]')) {
+    await page.click('[data-qa="chat-close"]');
+    await page.waitFor("document.querySelector('[data-qa=\\\"chat-widget\\\"]') === null", 5000, "chat close");
+  }
+}
+
 async function ask(page, question) {
   const before = await page.count('[data-qa="assistant-message"]');
   await page.setInput('[data-qa="chat-input"]', question);
@@ -344,6 +351,18 @@ async function ask(page, question) {
 
 async function expectIntent(page, intent) {
   await page.waitFor(`document.querySelector('[data-qa="assistant-message"][data-qa-intent="${intent}"]') !== null`, 10000, `intent ${intent}`);
+}
+
+async function expectDecisionSource(page, source) {
+  await page.waitFor(`([...document.querySelectorAll('[data-qa="assistant-message"]')].at(-1)?.getAttribute('data-qa-decision-source')) === ${JSON.stringify(source)}`, 10000, `decision source ${source}`);
+}
+
+async function expectAnswerOrigin(page, origin) {
+  await page.waitFor(`([...document.querySelectorAll('[data-qa="assistant-message"]')].at(-1)?.getAttribute('data-qa-answer-origin')) === ${JSON.stringify(origin)}`, 10000, `answer origin ${origin}`);
+}
+
+async function expectSearchQuery(page, query) {
+  await page.waitFor(`document.querySelector('[data-qa="assistant-message"] .search-query-answer code')?.textContent === ${JSON.stringify(query)}`, 10000, `search query ${query}`);
 }
 
 function expectIncludes(text, value, label = value) {
@@ -427,6 +446,30 @@ async function main() {
       { id: "S17", name: "keyword trend recommendation", run: async (p) => { await ask(p, "빅카인즈에 대한 보도량 추이를 살펴보고 싶어요"); await expectIntent(p, "FEATURE_RECOMMENDATION"); await p.waitFor("document.querySelector('[data-qa-capability=\\\"KEYWORD_TREND\\\"]') !== null", 10000, "keyword trend capability"); assert.equal(await p.exists(".search-query-answer"), false, "keyword trend request produced a search query"); } },
       { id: "S18", name: "exact historical lookup regression", run: async (p) => { await ask(p, "1997년 7월경 매일경제에 실린 아시아나 직원의 노동부 장관 표창 명단을 찾고 싶어요."); await expectIntent(p, "HISTORICAL_ARTICLE_LOOKUP"); await p.waitFor("document.querySelector('[data-qa=\\\"lookup-case\\\"]')?.getAttribute('data-qa-ready') === 'true'", 10000, "historical lookup ready"); await p.waitFor("document.querySelector('[data-qa=\\\"chat-input\\\"]')?.disabled === false", 5000, "historical lookup input enabled"); } },
       { id: "S19", name: "manual source link", run: async (p) => { await ask(p, "고신문은 어떻게 이용하나요?"); await expectIntent(p, "SERVICE_GUIDE"); await p.stubWindowOpen(); await p.clickByText("매뉴얼 근거 보기", { exact: true }); const opened = await p.globalValue("__QA_OPENED_URL__"); assert.match(opened, /\/manual\/.*%EB%B9%85%EC%B9%B4%EC%9D%B8%EC%A6%88_%EC%82%AC%EC%9A%A9%EC%9E%90%EB%A7%A4%EB%89%B4%EC%96%BC\.pdf#page=33$/); } },
+      { id: "S20", name: "full-text download fact", run: async (p, result) => { await ask(p, "기사 전체 다운로드는 가능한가요?"); await expectIntent(p, "SERVICE_FACT"); await expectDecisionSource(p, "DETERMINISTIC"); const text = await p.latestAssistantText(); expectIncludes(text, "본문 전체"); expectIncludes(text, "별도"); expectNotIncludes(text, "다운로드 문제를"); result.answer = text; } },
+      { id: "S21", name: "search result Excel guidance", run: async (p) => { await ask(p, "검색결과를 엑셀로 다운로드하려면 어떻게 하나요?"); await expectIntent(p, "SERVICE_GUIDE"); const text = await p.latestAssistantText(); expectIncludes(text, "다운로드"); expectIncludes(text, "분석"); expectNotIncludes(text, "다운로드 문제를"); } },
+      { id: "S22", name: "download button location guidance", run: async (p) => { await ask(p, "다운로드 버튼은 어디 있나요?"); await expectIntent(p, "SERVICE_GUIDE"); expectNotIncludes(await p.latestAssistantText(), "다운로드 문제를"); } },
+      { id: "S23", name: "missing download button support", run: async (p) => { await ask(p, "다운로드 버튼이 안 보여요"); await expectIntent(p, "SUPPORT_TRIAGE"); await expectDecisionSource(p, "DETERMINISTIC"); const issues = await p.evaluate("document.querySelector('[data-qa=\"support-case\"]')?.getAttribute('data-qa-support-issues') || ''"); expectIncludes(issues, "DOWNLOAD_PROBLEM"); } },
+      { id: "S24", name: "policy question hard handoff", run: async (p) => { await ask(p, "기사 원문을 다운로드해서 유료회원에게 제공해도 되나요?"); await expectIntent(p, "SUPPORT_TRIAGE"); await expectDecisionSource(p, "HARD_RULE"); const text = await p.latestAssistantText(); ["허용됩니다", "이용 가능합니다", "무료입니다"].forEach((term) => expectNotIncludes(text, term)); } },
+      { id: "S25", name: "audio usage guidance", run: async (p) => { await ask(p, "뉴스 듣기는 어디서 이용하나요?"); await expectIntent(p, "SERVICE_GUIDE"); const issues = await p.evaluate("document.querySelector('[data-qa=\"support-case\"]')?.getAttribute('data-qa-support-issues') || ''"); expectNotIncludes(issues, "AUDIO_PLAYBACK_PROBLEM"); } },
+      { id: "S26", name: "internal engine provenance with official source", run: async (p) => { await ask(p, "검색식 사용법을 알려줘"); await expectIntent(p, "SERVICE_GUIDE"); await expectAnswerOrigin(p, "INTERNAL_ENGINE"); await p.waitFor("([...document.querySelectorAll('[data-qa=\"assistant-message\"]')].at(-1)?.querySelector('.answer-origin-badge')?.textContent || '').includes('공식 근거·내부엔진')", 10000, "grounded internal provenance badge"); } },
+      { id: "S27", name: "internal engine provenance without matched source", run: async (p) => { await ask(p, "AI 반도체 관련 기사를 찾고 싶어요"); await expectIntent(p, "SEARCH_NEW"); await expectAnswerOrigin(p, "INTERNAL_ENGINE"); await p.waitFor("([...document.querySelectorAll('[data-qa=\"assistant-message\"]')].at(-1)?.querySelector('.answer-origin-badge')?.textContent || '').includes('내부엔진')", 10000, "internal provenance badge"); } },
+      { id: "S28", name: "official grounded document count", run: async (p) => { await p.waitFor("document.querySelector('[data-qa=\"grounded-document-count\"] strong')?.textContent === '67'", 15000, "official grounded document count 67"); } },
+      { id: "S29", name: "semantic route remains internal answer", run: async (p) => { await ask(p, "기업들이 같이 나오는 흐름 같은 걸 보고 싶은데 검색을 해야 하는지 분석을 해야 하는지 모르겠어요"); await expectAnswerOrigin(p, "INTERNAL_ENGINE"); } },
+      { id: "PC01", name: "platform context removes BIGKinds", run: async (p) => { await ask(p, "빅카인즈에서 이재명 관련된 기사를 찾고 싶어"); await expectIntent(p, "SEARCH_NEW"); await expectSearchQuery(p, "이재명"); expectNotIncludes(await p.latestAssistantText(), "빅카인즈 AND"); } },
+      { id: "PC02", name: "platform context supports spaced brand", run: async (p) => { await ask(p, "BIG KINDS에서 이재명 기사를 찾아줘"); await expectIntent(p, "SEARCH_NEW"); await expectSearchQuery(p, "이재명"); } },
+      { id: "PC03", name: "platform context through phrase", run: async (p) => { await ask(p, "빅카인즈를 통해 이재명 기사를 검색해줘"); await expectIntent(p, "SEARCH_NEW"); await expectSearchQuery(p, "이재명"); } },
+      { id: "PC04", name: "BIGKinds as search topic is preserved", run: async (p) => { await ask(p, "빅카인즈 관련 기사를 찾아줘"); await expectIntent(p, "SEARCH_NEW"); await expectSearchQuery(p, "빅카인즈"); } },
+      { id: "PC05", name: "BIGKinds trend topic recommends keyword trend", run: async (p) => { await ask(p, "빅카인즈에 대한 보도량 추이를 보고 싶어요"); await expectIntent(p, "FEATURE_RECOMMENDATION"); await p.waitFor("document.querySelector('[data-qa-capability=\"KEYWORD_TREND\"]') !== null", 10000, "keyword trend capability"); await p.waitFor("document.querySelector('[data-qa=\"assistant-recommendation-card\"]') !== null", 10000, "recommendation card"); } },
+      { id: "PC06", name: "platform phrase and topic preserve one BIGKinds term", run: async (p) => { await ask(p, "빅카인즈에서 빅카인즈 관련 기사를 찾아줘"); await expectIntent(p, "SEARCH_NEW"); await expectSearchQuery(p, "빅카인즈"); } },
+      { id: "UX01", name: "standalone shell uses launcher instead of hero search", run: async (p) => { await closeChat(p); assert.equal(await p.exists('[data-qa="hero-question-input"]'), false, "standalone hero input should be absent"); assert.equal(await p.exists('[data-qa="quick-start"]'), false, "standalone quick start should be absent"); assert.equal(await p.exists('[data-qa="hero-open-chat"]'), true, "hero open-chat CTA is missing"); assert.equal(await p.exists('[data-qa="chat-launcher"]'), true, "floating launcher is missing"); } },
+      { id: "UX02", name: "session teaser can be dismissed", run: async (p) => { await closeChat(p); await p.waitFor("document.querySelector('[data-qa=\"chat-teaser\"]') !== null", 3000, "session teaser"); const teaserText = await p.text('[data-qa="chat-teaser"]'); expectIncludes(teaserText, "사용 중 불편한 점이 있나요?", "teaser title"); expectIncludes(teaserText, "빠르게 답변 받을 수 있어요", "teaser subtitle"); await p.click('[data-qa="chat-teaser-close"]'); await p.waitFor("document.querySelector('[data-qa=\"chat-teaser\"]') === null", 3000, "teaser dismissed"); } },
+      { id: "UX03", name: "page context updates recommendations", run: async (p) => { await p.evaluate("window.postMessage({ type: 'bigkinds-chatbot-context', context: { pathname: '/v2/news/search.do', pageType: 'NEWS_SEARCH' } }, '*')"); await p.waitFor("document.querySelector('.context-note')?.textContent.includes('뉴스 검색')", 5000, "news search context"); await p.waitFor("document.querySelector('[data-qa=\"purpose-primary-item\"]') !== null", 5000, "contextual primary recommendations"); } },
+      { id: "UX04", name: "purpose panel has primary and secondary actions", run: async (p) => { await p.waitFor("document.querySelectorAll('[data-qa=\"purpose-primary-item\"]').length === 4", 10000, "four primary purposes"); await p.waitFor("document.querySelectorAll('[data-qa=\"purpose-secondary\"] button').length === 3", 10000, "three secondary actions"); } },
+      { id: "UX05", name: "feature recommendation card has provenance", run: async (p) => { await ask(p, "빅카인즈에 대한 보도량 추이를 보고 싶어요"); await expectIntent(p, "FEATURE_RECOMMENDATION"); await p.waitFor("document.querySelector('[data-qa=\"assistant-recommendation-card\"]') !== null", 10000, "recommendation card"); await p.waitFor("document.querySelector('[data-qa=\"assistant-recommendation-card\"]')?.getAttribute('data-qa-recommendation-source') === 'CONTEXT_RULE'", 10000, "recommendation provenance"); } },
+      { id: "UX06", name: "clarification card", run: async (p) => { await ask(p, "기업도 보고 싶어요"); await expectIntent(p, "CLARIFY"); await p.waitFor("document.querySelector('[data-qa=\"clarification-card\"]') !== null", 10000, "clarification card"); } },
+      { id: "UX07", name: "provenance badge class", run: async (p) => { await ask(p, "검색식과 연산자는 어떻게 쓰나요?"); await expectAnswerOrigin(p, "INTERNAL_ENGINE"); await p.waitFor("[...document.querySelectorAll('[data-qa=\"assistant-message\"]')].at(-1)?.querySelector('.answer-origin-badge.engine-origin') !== null", 10000, "engine provenance class"); } },
+      { id: "UX08", name: "embedded mode has no standalone hero", run: async (p) => { await p.navigate(`${baseUrl}/?embed=1&qa-run=${Date.now()}`); await p.waitFor("document.querySelector('[data-qa-ready=\"true\"]') !== null", 60000, "embedded readiness"); assert.equal(await p.exists('[data-qa="hero-question-input"]'), false, "embedded hero should be absent"); assert.equal(await p.exists('[data-qa="quick-start"]'), false, "embedded quick start should be absent"); assert.equal(await p.exists('[data-qa="metric-faq"]'), false, "embedded metrics should be absent"); assert.equal(await p.exists('[data-qa="kpf-footer"]'), false, "embedded footer should be absent"); assert.equal(await p.exists('[data-qa="chat-teaser"]'), false, "embedded teaser should be absent"); } },
     ];
     for (const scenario of scenarios) {
       const result = await runScenario(page, scenario);

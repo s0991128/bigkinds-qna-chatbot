@@ -1,8 +1,8 @@
 "use client";
 
 import { FormEvent, startTransition, useEffect, useMemo, useRef, useState } from "react";
-import { FAQ_SOURCE_URL, faqItems } from "../lib/faq";
-import { isAnswerableDocument, searchFaq, SearchableDocument } from "../lib/search";
+import { FAQ_SOURCE_URL } from "../lib/faq";
+import { countOfficialGroundedDocuments, isAnswerableDocument, searchFaq, SearchableDocument } from "../lib/search";
 import { evaluateSearchConfidence } from "../lib/search-confidence";
 import { formatAnswer, OPEN_API_PURCHASE_URL } from "../lib/answer-format";
 import { buildAnswerViewModel, AnswerViewModel } from "../lib/answer-model";
@@ -12,15 +12,15 @@ import { buildSearchQuery, describeSearchQuery, validateSearchInput, SearchQuery
 import { normalizeSearchInput } from "../lib/search-term-normalizer";
 import { detectDiagnosticKind, DiagnosticFlow, getDiagnosticFlow } from "../lib/diagnostic-flows";
 import { recordFeedback } from "../lib/feedback";
-import { classifySearchTurn, detectSearchExpressionIntent, extractSimpleSearchGoal, isArticleContentQuestion, isChatbotMetaQuestion, isDateQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isOpenApiQuestion, isQnaRankingQuestion, isSearchGoalQuestion, isSearchUsageQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
-import { generateRecommendedQuestions } from "../lib/recommendations";
+import { classifySearchTurn, detectSearchExpressionIntent, extractSimpleSearchGoal, isArticleContentQuestion, isChatbotMetaQuestion, isDateQuestion, isFullTextDownloadQuestion, isKnowledgeDocumentsQuestion, isLikelyGeneralKnowledgeQuestion, isOpenApiQuestion, isQnaRankingQuestion, isSearchGoalQuestion, isSearchUsageQuestion, isStoredArticleCountQuestion, isUnderspecifiedQuestion, todayInKorea } from "../lib/question-intents";
+import { rankRecommendations, selectRecommendationBuckets, type RankedRecommendation, type RecommendationCandidate, type RecommendationContext, type RecommendationSource } from "../lib/recommendation-engine";
 import { capabilitySourcesExist, getCapabilitiesById, recommendCapabilities, Capability } from "../lib/capabilities";
 import { recordInsight } from "../lib/insights";
 import { routeUserIntent } from "../lib/intent-router";
 import type { UserIntent } from "../lib/intent-router";
 import { diagnoseSearchExpression, parseSearchExpression, SearchDiagnosis } from "../lib/search-diagnostics";
 import { archiveChatSession, ChatSession, createChatSession, loadActiveChatSession, PersistedChatMessage, PersistedMessageAction, saveActiveChatSession, shouldStartNewSession } from "../lib/chat-session";
-import type { AiInterpretation, AiIntent, AiRouterResponse, AiSearchInput, AiSuggestedTerms, AiTask, DecisionSource } from "../lib/ai/types";
+import type { AiInterpretation, AiIntent, AiRouterResponse, AiSearchInput, AiSuggestedTerms, AiTask, AnswerOrigin, DecisionSource } from "../lib/ai/types";
 import { applySearchTurn, createSearchContext, emptySearchContext, getSearchContextStatus } from "../lib/search-context";
 import type { SearchContext, SearchTurnResult } from "../lib/search-context";
 import { buildLookupStrategies, type LookupStrategy } from "../lib/article-lookup-strategy";
@@ -67,6 +67,8 @@ type Message = {
   policyHandoff?: boolean;
   suggestedTerms?: AiSuggestedTerms[];
   decisionSource?: DecisionSource;
+  recommendationSource?: RecommendationSource;
+  answerOrigin?: AnswerOrigin;
   aiTask?: AiTask;
   aiAvailable?: boolean;
 };
@@ -90,6 +92,7 @@ const welcomeMessage: Message = {
   id: 1,
   role: "assistant",
   text: "안녕하세요. 빅카인즈 공식 Q&A·FAQ·소개·정책 문서를 바탕으로 뉴스 검색·분석 이용 방법을 안내해 드릴게요. 기사 원문 검색·요약은 지원하지 않으니 궁금한 이용 방법을 편하게 물어보세요.",
+  answerOrigin: "INTERNAL_ENGINE",
 };
 
 const purposeMenu: Array<{ label: string; description: string; mode: PurposeMode }> = [
@@ -102,6 +105,8 @@ const purposeMenu: Array<{ label: string; description: string; mode: PurposeMode
   { label: "이용 안내", description: "수록·다운로드·분석 안내", mode: "USAGE_GUIDE" },
   { label: "OPEN API", description: "뉴스토어 신청·계약 안내", mode: "OPEN_API" },
 ];
+
+const secondaryPurposeMenu = purposeMenu.filter((item) => ["USAGE_GUIDE", "TROUBLESHOOT", "OPEN_API"].includes(item.mode));
 
 const searchGoalFallbackQuestions = [
   "검색식 만들어보기",
@@ -234,6 +239,8 @@ function toPersistedMessage(message: Message): PersistedChatMessage {
     capabilities: message.capabilities,
     suggestedTerms: message.suggestedTerms,
     decisionSource: message.decisionSource,
+    recommendationSource: message.recommendationSource,
+    answerOrigin: message.answerOrigin,
     aiTask: message.aiTask,
     aiAvailable: message.aiAvailable,
   };
@@ -273,6 +280,8 @@ function fromPersistedMessage(message: PersistedChatMessage): Message {
     capabilities: message.capabilities,
     suggestedTerms: message.suggestedTerms,
     decisionSource: message.decisionSource,
+    recommendationSource: message.recommendationSource,
+    answerOrigin: message.answerOrigin ?? "INTERNAL_ENGINE",
     aiTask: message.aiTask,
     aiAvailable: message.aiAvailable,
   };
@@ -286,6 +295,7 @@ export default function Home() {
   const [chatOpen, setChatOpen] = useState(false);
   const [showChatTeaser, setShowChatTeaser] = useState(false);
   const [selectedKnowledgeType, setSelectedKnowledgeType] = useState<KnowledgeType | null>(null);
+  const [showKnowledgeEvidence, setShowKnowledgeEvidence] = useState(false);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [knowledge, setKnowledge] = useState<SearchableDocument[]>([]);
   const [dataReady, setDataReady] = useState(false);
@@ -297,7 +307,8 @@ export default function Home() {
   const [showRecommendations, setShowRecommendations] = useState(true);
   const [showPurposeMenu, setShowPurposeMenu] = useState(true);
   const [activeMode, setActiveMode] = useState<StartMode>(null);
-  const [recommendedQuestions, setRecommendedQuestions] = useState<string[]>(() => generateRecommendedQuestions("HOME", faqItems));
+  const [rankedRecommendations, setRankedRecommendations] = useState<RankedRecommendation[]>([]);
+  const [recommendedQuestions, setRecommendedQuestions] = useState<string[]>([]);
   const [queryBuilder, setQueryBuilder] = useState<SearchQueryInput>({ any: [], all: [], exact: [], exclude: [] });
   const [queryBuilderText, setQueryBuilderText] = useState<Record<string, string>>({ any: "", all: "", exact: "", exclude: "" });
   const nextId = useRef(2);
@@ -306,6 +317,7 @@ export default function Home() {
   const sessionRef = useRef<ChatSession>(createChatSession());
   const sessionIdRef = useRef(sessionRef.current.id);
   const messagesRef = useRef<Message[]>([welcomeMessage]);
+  const recentRecommendationIdsRef = useRef<string[]>([]);
   const hydratedRef = useRef(false);
   const workingStateRef = useRef<SearchWorkingState>({
     lastIntent: null,
@@ -386,7 +398,7 @@ export default function Home() {
         pageType: incoming.pageType || classifyPagePath(incoming.pathname),
         loggedIn: incoming.loggedIn ?? null,
       });
-      setRecommendedQuestions((current) => generateRecommendedQuestions(incoming.pageType || classifyPagePath(incoming.pathname), knowledge, current));
+      refreshRecommendations(incoming.pageType || classifyPagePath(incoming.pathname), knowledge);
       setShowRecommendations(true);
     };
     window.addEventListener("message", onContext);
@@ -411,7 +423,9 @@ export default function Home() {
         for (const path of dataScriptPaths) await loadScript(path);
         const documents = window.BIGKINDS_KNOWLEDGE_BASE?.documents ?? [];
         if (!cancelled && documents.length) {
-          setKnowledge(documents.map(normalizeKnowledgeDocument));
+          const normalizedDocuments = documents.map(normalizeKnowledgeDocument);
+          setKnowledge(normalizedDocuments);
+          refreshRecommendations(pageContext.pageType, normalizedDocuments);
           setDataReady(true);
         }
       } catch {
@@ -432,6 +446,15 @@ export default function Home() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages, isTyping]);
+
+  useEffect(() => {
+    const latest = messages[messages.length - 1];
+    if (!chatOpenRef.current || messages.length <= 1 || latest?.role !== "assistant") return;
+    refreshRecommendations();
+    setShowRecommendations(true);
+  // Recommendation state is derived from the latest answer and current page context.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length, knowledge, pageContext.pageType]);
 
   function persistCurrentSessionNow(currentMessages = messagesRef.current) {
     if (!hydratedRef.current) return;
@@ -475,14 +498,32 @@ export default function Home() {
   );
 
   const faqCount = useMemo(
-    () => knowledge.filter((item) => item.id.startsWith("official-faq-")).length || 23,
+    () => knowledge.filter((item) => item.id.startsWith("official-faq-")).length,
     [knowledge],
   );
 
   const groundedDocumentCount = useMemo(
-    () => knowledge.filter(isAnswerableDocument).length,
+    () => countOfficialGroundedDocuments(knowledge),
     [knowledge],
   );
+
+  const qnaCount = useMemo(
+    () => knowledge.filter((item) => getKnowledgeType(item) === "qna").length,
+    [knowledge],
+  );
+
+  const storedArticleBodyCount = useMemo(
+    () => knowledge.filter((item) => item.id.startsWith("article-body-")).length,
+    [knowledge],
+  );
+
+  const knowledgeStatusCounts = useMemo(() => ({
+    all: knowledge.length,
+    answerable: groundedDocumentCount,
+    review: knowledge.filter((item) => item.status === "REVIEW_REQUIRED").length,
+    handoff: knowledge.filter((item) => item.answerMode === "HANDOFF_ONLY").length,
+    internal: knowledge.filter((item) => item.answerMode === "INTERNAL_REFERENCE").length,
+  }), [groundedDocumentCount, knowledge]);
 
   const knowledgeGroups = useMemo(() => {
     const counts = knowledge.reduce<Record<KnowledgeType, number>>(
@@ -520,12 +561,52 @@ export default function Home() {
 
   const contextLabel = pageTypeLabels[pageContext.pageType];
 
+  function getRecommendationContext(pageType = pageContext.pageType): RecommendationContext {
+    const searchStatus = getSearchContextStatus(aiStateRef.current.searchContext);
+    return {
+      pageType,
+      loggedIn: pageContext.loggedIn,
+      activeMode: aiStateRef.current.activeMode,
+      lastIntent: aiStateRef.current.lastIntent,
+      lastCapabilityId: aiStateRef.current.lastCapabilityId,
+      searchContextStatus: aiStateRef.current.searchContext.input
+        ? searchStatus === "STALE" ? "STALE" : "ACTIVE"
+        : "EMPTY",
+      searchRevision: aiStateRef.current.searchRevision,
+      recentRecommendationIds: recentRecommendationIdsRef.current,
+    };
+  }
+
+  function refreshRecommendations(pageType = pageContext.pageType, documents = knowledge) {
+    const context = getRecommendationContext(pageType);
+    const ranked = rankRecommendations(context, documents);
+    const buckets = selectRecommendationBuckets(ranked);
+    setRankedRecommendations(ranked);
+    setRecommendedQuestions(buckets.suggestedQuestions.map((item) => item.candidate.question).filter((question): question is string => Boolean(question)).slice(0, 3));
+    recentRecommendationIdsRef.current = buckets.primary.slice(0, 4).map((item) => item.candidate.id);
+    if (ranked.length) recordInsight({ eventType: "RECOMMENDATION_CONTEXT_RULE", pageType });
+  }
+
+  function handleRecommendation(candidate: RecommendationCandidate) {
+    recentRecommendationIdsRef.current = [candidate.id, ...recentRecommendationIdsRef.current.filter((id) => id !== candidate.id)].slice(0, 3);
+    if (candidate.mode) {
+      startMode(candidate.mode as PurposeMode);
+      return;
+    }
+    if (candidate.question) {
+      ask(candidate.question);
+      return;
+    }
+    if (candidate.capabilityId) ask(`${candidate.label} 사용법을 알려줘`);
+  }
+
   const builtSearchQuery = useMemo(() => buildSearchQuery(queryBuilder), [queryBuilder]);
   const builtSearchDescription = useMemo(() => describeSearchQuery(queryBuilder), [queryBuilder]);
 
   function openKnowledgeGroup(group: KnowledgeGroup) {
     if (!dataReady || group.count === 0) return;
     setSelectedKnowledgeType(group.key);
+    setShowKnowledgeEvidence(true);
     const firstDocument = knowledge.find((document) => getKnowledgeType(document) === group.key);
     setSelectedDocumentId(firstDocument?.id ?? null);
   }
@@ -534,8 +615,13 @@ export default function Home() {
     chatOpenRef.current = true;
     setChatOpen(true);
     setShowChatTeaser(false);
-    setRecommendedQuestions((current) => generateRecommendedQuestions(pageContext.pageType, knowledge, current));
+    refreshRecommendations();
     setShowRecommendations(true);
+  }
+
+  function scrollToEvidence() {
+    setShowKnowledgeEvidence(true);
+    window.setTimeout(() => document.querySelector('[data-qa="official-evidence"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
   function dismissChatTeaser() {
@@ -621,8 +707,13 @@ export default function Home() {
     recordInsight({ eventType, pageType: pageContext.pageType });
   }
 
-  function decisionMeta(): Pick<Message, "decisionSource" | "aiTask" | "aiAvailable"> {
-    return { ...routingTraceRef.current };
+  function engineAnswerMeta(): Pick<Message, "answerOrigin"> {
+    recordInsight({ eventType: "ANSWER_INTERNAL_ENGINE", pageType: pageContext.pageType });
+    return { answerOrigin: "INTERNAL_ENGINE" };
+  }
+
+  function decisionMeta(): Pick<Message, "decisionSource" | "answerOrigin" | "aiTask" | "aiAvailable"> {
+    return { ...routingTraceRef.current, ...engineAnswerMeta() };
   }
 
   async function requestAi(question: string, task: AiTask = "ROUTE", stateOverride?: Partial<SearchWorkingState>) : Promise<AiRouterResponse> {
@@ -752,6 +843,7 @@ export default function Home() {
     setMessages((current) => [...current, {
       id: nextId.current++, role: "assistant", text: `추천 기능: ${matches[0].label}`,
       capabilities: matches, capabilityId: matches[0]?.id, intent: "FEATURE_RECOMMENDATION", question: cleanQuestion,
+      recommendationSource: "CONTEXT_RULE",
       ...decisionMeta(),
       actions: capability ? [{ id: `capability-${capability.id}`, label: `${capability.label} 사용법 보기`, type: "SHOW_GUIDE", value: guideQuestions[capability.id] || `${capability.label} 사용법을 알려줘` }] : [],
     }]);
@@ -768,6 +860,7 @@ export default function Home() {
     setMessages((current) => [...current, {
       id: nextId.current++, role: "assistant", text: "기능 비교: 목적에 따라 이렇게 구분할 수 있습니다.",
       capabilityComparison: matches, intent: "FEATURE_RECOMMENDATION", question: cleanQuestion,
+      recommendationSource: "CONTEXT_RULE",
       ...decisionMeta(),
     }]);
     matches.forEach((capability) => recordInsight({ eventType: "FEATURE_RECOMMENDED", pageType: pageContext.pageType, capabilityId: capability.id }));
@@ -956,7 +1049,7 @@ export default function Home() {
   function resetArticleLookup() {
     setActiveMode("ARTICLE_LOOKUP");
     updateWorkingState({ activeMode: "ARTICLE_LOOKUP", lastIntent: "HISTORICAL_ARTICLE_LOOKUP", articleLookupContext: emptyArticleLookupContext() });
-    setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "찾으시는 자료에 대해 알고 있는 내용을 입력해 주세요.\n\n예: 1997년 7월경 매일경제에 실린 아시아나 직원의 노동부장관 표창 명단을 찾고 싶어요.", intent: "ARTICLE_LOOKUP" }]);
+    setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "찾으시는 자료에 대해 알고 있는 내용을 입력해 주세요.\n\n예: 1997년 7월경 매일경제에 실린 아시아나 직원의 노동부장관 표창 명단을 찾고 싶어요.", intent: "ARTICLE_LOOKUP", ...engineAnswerMeta() }]);
   }
 
   function startMode(mode: PurposeMode) {
@@ -998,20 +1091,20 @@ export default function Home() {
     const prompt = prompts[mode];
     setActiveMode(mode);
     updateWorkingState({ activeMode: mode, lastIntent: mode as AiIntent });
-    setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: prompt.text, intent: mode, actions: prompt.actions }]);
+    setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: prompt.text, intent: mode, actions: prompt.actions, ...engineAnswerMeta() }]);
   }
 
   function handleMessageAction(action: PersistedMessageAction) {
     if (action.type === "SET_MODE" && action.value) startMode(action.value as PurposeMode);
     else if (action.type === "CONFIRM_LOOKUP_CASE") showLookupStrategies();
-    else if (action.type === "EDIT_LOOKUP_CASE") setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "수정할 조건을 입력해 주세요.\n예: 기간을 1997년 6~8월로 바꿔줘, 언론사는 매일경제만, 아시아나항공도 검색어에 넣어줘.", intent: "ARTICLE_LOOKUP" }]);
+    else if (action.type === "EDIT_LOOKUP_CASE") setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "수정할 조건을 입력해 주세요.\n예: 기간을 1997년 6~8월로 바꿔줘, 언론사는 매일경제만, 아시아나항공도 검색어에 넣어줘.", intent: "ARTICLE_LOOKUP", ...engineAnswerMeta() }]);
     else if (action.type === "RESET_ARTICLE_LOOKUP") resetArticleLookup();
     else if (action.type === "USE_LOOKUP_STRATEGY" && action.value) applyLookupStrategy(action.value);
     else if (action.type === "SET_LOOKUP_RESULT" && (action.value === "FOUND" || action.value === "NOT_FOUND" || action.value === "CANDIDATE")) setLookupResultStatus(action.value);
     else if (action.type === "GENERATE_LOOKUP_REPLY") showLookupReplyDraft();
     else if (action.type === "SHOW_LOOKUP_GUIDANCE") {
       recordInsight({ eventType: "ARTICLE_LOOKUP_ESCALATED", pageType: pageContext.pageType });
-      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "일반 기사 형태가 아니라 지면의 별도 명단·박스 자료일 가능성이 있습니다. BIGKinds는 협약 언론사로부터 제공받은 기사 데이터를 기반으로 하므로, 정확한 원지면 확인이 필요하면 해당 언론사에 해당 일자·지면의 열람 가능 여부를 문의할 수 있습니다.", intent: "HISTORICAL_ARTICLE_LOOKUP" }]);
+      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "일반 기사 형태가 아니라 지면의 별도 명단·박스 자료일 가능성이 있습니다. BIGKinds는 협약 언론사로부터 제공받은 기사 데이터를 기반으로 하므로, 정확한 원지면 확인이 필요하면 해당 언론사에 해당 일자·지면의 열람 가능 여부를 문의할 수 있습니다.", intent: "HISTORICAL_ARTICLE_LOOKUP", ...engineAnswerMeta() }]);
     }
     else if (action.type === "COPY_QUERY" && action.value) void copyText(action.value);
     else if (action.type === "COPY_SUPPORT_REQUEST" && action.value) void copyText(action.value);
@@ -1058,6 +1151,7 @@ export default function Home() {
       role: "assistant",
       text: "새로 찾고 싶은 뉴스 주제를 입력해 주세요.",
       intent: "SEARCH_NEW",
+      ...engineAnswerMeta(),
     }]);
   }
 
@@ -1367,6 +1461,14 @@ export default function Home() {
       }
 
       if (routed.intent === "SERVICE_FACT") {
+        if (isFullTextDownloadQuestion(cleanQuestion)) {
+          const fullTextDocument = knowledge.find((item) => item.id === "bigkinds-canonical-fulltext-download");
+          if (fullTextDocument) {
+            showOfficialDocument(fullTextDocument, cleanQuestion, "SERVICE_FACT");
+            setIsTyping(false);
+            return;
+          }
+        }
         const coverageQuestion = /1990년대|몇\s*년도|이전\s*뉴스|고신문|신문/i.test(cleanQuestion);
         const scaleQuestion = /언론사|수록|몇\s*건|보유|전체\s*기사/i.test(cleanQuestion);
         const factDocument = scaleQuestion
@@ -1700,7 +1802,7 @@ export default function Home() {
       const searchUsageDocument = isSearchUsageQuestion(cleanQuestion)
         ? knowledge.find((item) => item.id === "bigkinds-intro-overview")
         : undefined;
-      const fullTextDownload = /기사.*(?:전체|본문|전문)|(?:전체|본문|전문).*기사/i.test(cleanQuestion);
+      const fullTextDownload = isFullTextDownloadQuestion(cleanQuestion);
       const downloadDocument = routed.intent === "SERVICE_GUIDE"
         ? knowledge.find((item) => item.id === (fullTextDownload ? "bigkinds-canonical-fulltext-download" : "bigkinds-canonical-download"))
         : undefined;
@@ -1811,7 +1913,7 @@ export default function Home() {
     setFeedback({});
     setFeedbackReasons({});
     setExpandedMessages({});
-    setRecommendedQuestions((current) => generateRecommendedQuestions(pageContext.pageType, knowledge, current));
+    refreshRecommendations();
     setShowRecommendations(true);
     setShowPurposeMenu(true);
     saveActiveChatSession(sessionRef.current);
@@ -1856,18 +1958,36 @@ export default function Home() {
 
           <section className="demo-content">
             <div className="demo-copy">
-              <p className="section-label">BIG KINDS · 이용 Q&amp;A</p>
-              <h1>빅카인즈 이용,<br />필요한 답부터 찾으세요.</h1>
-              <p className="lead">
-                뉴스 검색·분석 이용 방법과 OPEN API 문의 경로를 공식 안내와 Q&amp;A에서 찾아
-                이해하기 쉬운 답변으로 정리해 드립니다. 기사 원문 검색·요약은 제공하지 않습니다.
-              </p>
-              <div className="metric-row" aria-label="프로토타입 특징">
-              <div><strong>{faqCount}</strong><span>공식 FAQ</span></div>
-                <div><strong>{dataReady ? groundedDocumentCount.toLocaleString("ko-KR") : "···"}</strong><span>공식 근거 문서</span></div>
-                <div><strong>0건</strong><span>기사 본문 저장</span></div>
+              <section className="hero-panel" aria-labelledby="hero-title">
+                <p className="section-label">BIG KINDS · 이용 도우미</p>
+                <h1 id="hero-title">BIGKinds 이용을<br />필요한 순간에<br />도와드립니다.</h1>
+                <p className="lead">검색식 작성, 분석 기능 추천,<br />과거 자료 찾기, 이용 문제 해결을<br />공식 근거와 AI를 활용해 안내합니다.</p>
+                <div className="hero-showcase-note"><strong>부착형 이용 도우미</strong><span>기존 BIGKinds 화면을 방해하지 않고 필요한 순간에 검색·분석·이용 방법을 안내합니다.</span></div>
+                <div className="hero-cta-row">
+                  <button type="button" className="hero-cta primary" data-qa="hero-open-chat" onClick={openChat}>이용 도우미 열기 <span aria-hidden="true">→</span></button>
+                  <button type="button" className="hero-cta" data-qa="hero-evidence" onClick={scrollToEvidence}>공식 근거 보기 <span aria-hidden="true">→</span></button>
+                </div>
+              </section>
+
+              <div className="metric-row" aria-label="공식 지식 문서 지표">
+                <div data-qa="metric-faq"><strong>{dataReady ? faqCount.toLocaleString("ko-KR") : "···"}</strong><span>공식 FAQ</span></div>
+                <div data-qa="metric-qna" aria-description="운영지원 공식 Q&A · 검토형 문서 포함"><strong>{dataReady ? qnaCount.toLocaleString("ko-KR") : "···"}</strong><span>공식 Q&amp;A</span><small>검토형 문서 포함</small></div>
+                <div data-qa="grounded-document-count" aria-description="현행성·답변 가능 조건을 통과한 문서"><strong>{dataReady ? groundedDocumentCount.toLocaleString("ko-KR") : "···"}</strong><span>직접 답변 가능 근거</span><small>현행성·답변 가능 조건 통과</small></div>
+                <div data-qa="metric-article-body"><strong>{dataReady ? storedArticleBodyCount.toLocaleString("ko-KR") : "···"}건</strong><span>기사 본문 저장</span></div>
               </div>
-              <div className="knowledge-breakdown" aria-label="검색 문서 유형">
+              <details className="knowledge-evidence" data-qa="official-evidence" open={showKnowledgeEvidence} onToggle={(event) => setShowKnowledgeEvidence(event.currentTarget.open)}>
+                <summary>공식 근거 자세히 보기</summary>
+                <div className="knowledge-evidence-body">
+                  <p className="knowledge-evidence-intro">문서가 적재되어 있어도 현행성·답변 가능 조건을 통과한 문서만 직접 답변 근거로 사용합니다. Q&amp;A는 검토형 문서를 포함합니다.</p>
+                  <div className="evidence-status-grid" aria-label="공식 근거 상태 요약">
+                    <div><strong>{dataReady ? knowledgeStatusCounts.all.toLocaleString("ko-KR") : "···"}</strong><span>전체 검색 문서</span></div>
+                    <div><strong>{dataReady ? knowledgeStatusCounts.answerable.toLocaleString("ko-KR") : "···"}</strong><span>직접 답변 가능</span></div>
+                    <div><strong>{dataReady ? knowledgeStatusCounts.review.toLocaleString("ko-KR") : "···"}</strong><span>검토 필요</span></div>
+                    <div><strong>{dataReady ? knowledgeStatusCounts.handoff.toLocaleString("ko-KR") : "···"}</strong><span>이관 전용</span></div>
+                    <div><strong>{dataReady ? knowledgeStatusCounts.internal.toLocaleString("ko-KR") : "···"}</strong><span>내부 참고</span></div>
+                  </div>
+                  <small className="evidence-status-note">검토 필요·이관 전용·내부 참고 문서는 정책에 따라 서로 중복될 수 있습니다.</small>
+                  <div className="knowledge-breakdown" aria-label="검색 문서 유형">
                 {knowledgeGroups.map((group) => (
                   <button
                     className={`knowledge-card knowledge-card-${group.key} ${selectedKnowledgeType === group.key ? "selected" : ""}`}
@@ -1882,7 +2002,7 @@ export default function Home() {
                     <small>{group.description}</small>
                   </button>
                 ))}
-              </div>
+                  </div>
               {!selectedKnowledgeGroup && (
                 <p className="knowledge-detail-hint">문서 유형을 선택하면 실제 검색문서와 상세 내용을 한 화면에서 확인할 수 있습니다.</p>
               )}
@@ -1894,7 +2014,7 @@ export default function Home() {
                       <h2>{selectedKnowledgeGroup.label}</h2>
                       <p>{selectedKnowledgeGroup.count}건의 {selectedKnowledgeGroup.description} 문서</p>
                     </div>
-                    <button className="knowledge-detail-close" type="button" onClick={() => setSelectedKnowledgeType(null)}>닫기</button>
+                    <button className="knowledge-detail-close" type="button" onClick={() => { setSelectedKnowledgeType(null); setShowKnowledgeEvidence(false); }}>닫기</button>
                   </div>
                   <div className="knowledge-detail-body">
                     <div className="knowledge-document-list" aria-label="문서 목록">
@@ -1936,6 +2056,8 @@ export default function Home() {
                   </div>
                 </section>
               )}
+                </div>
+              </details>
               <div className="trust-note">
                 <span aria-hidden="true">✓</span>
                 <p><strong>공식 자료를 우선합니다.</strong> 근거가 없으면 추측하지 않습니다.<br />빅카인즈 Q&amp;A는 저장된 공식 문서를 기준으로 안내합니다.</p>
@@ -1984,8 +2106,11 @@ export default function Home() {
         {showPurposeMenu && (
           <section className="purpose-panel" aria-label="도움이 필요한 목적 선택" data-qa="purpose-menu">
             <div className="purpose-heading"><strong>어떤 도움이 필요하신가요?</strong><span>원하는 목적을 고르면 다음 단계부터 안내해 드립니다.</span></div>
-            <div className="purpose-grid">
-              {purposeMenu.map((item) => <button key={item.label} type="button" onClick={() => startMode(item.mode)} disabled={isTyping}><b>{item.label}</b><small>{item.description}</small></button>)}
+            <div className="purpose-grid purpose-primary-grid" data-qa="purpose-primary">
+              {selectRecommendationBuckets(rankedRecommendations).primary.map((item) => <button key={item.candidate.id} type="button" onClick={() => handleRecommendation(item.candidate)} disabled={isTyping} data-qa="purpose-primary-item"><b>{item.candidate.label}</b><small>{item.candidate.description}</small></button>)}
+            </div>
+            <div className="purpose-secondary-row" data-qa="purpose-secondary" aria-label="추가 도움말">
+              {secondaryPurposeMenu.map((item) => <button key={item.label} type="button" onClick={() => startMode(item.mode)} disabled={isTyping}>{item.label}</button>)}
             </div>
             <p className="direct-question-note">직접 질문해도 됩니다.</p>
             <button className="direct-question-example" type="button" onClick={() => setQuery("반도체와 인공지능 관련 뉴스에서 주가는 빼고 검색하고 싶어요.")}>예: 반도체와 인공지능 관련 뉴스에서 주가는 빼고 검색하고 싶어요.</button>
@@ -1993,10 +2118,11 @@ export default function Home() {
         )}
 
         {showRecommendations && !showPurposeMenu && (
-          <section className="recommendation-panel" aria-label="추천 질문">
-            <div className="recommendation-heading"><strong>추천 질문</strong><span>페이지와 문서 유형에 맞춰 매번 새로 추천합니다</span></div>
+          <section className="recommendation-panel" aria-label="추천 질문" data-qa="recommendation-panel" data-qa-recommendation-source={rankedRecommendations[0]?.source || "CONTEXT_RULE"}>
+            <div className="recommendation-heading"><strong>지금 이 화면에서 해볼 일</strong><span>현재 페이지와 대화 흐름에 맞춘 추천</span></div>
             <div className="recommendation-list">
-              {recommendedQuestions.map((question) => <button key={question} type="button" onClick={() => ask(question)} disabled={isTyping}>{question}<span aria-hidden="true">›</span></button>)}
+              {selectRecommendationBuckets(rankedRecommendations).suggestedQuestions.map((item) => <button key={item.candidate.id} type="button" onClick={() => handleRecommendation(item.candidate)} disabled={isTyping} data-qa-recommendation-id={item.candidate.id}>{item.candidate.label}<span aria-hidden="true">›</span></button>)}
+              {selectRecommendationBuckets(rankedRecommendations).suggestedQuestions.length === 0 && recommendedQuestions.map((question) => <button key={question} type="button" onClick={() => ask(question)} disabled={isTyping}>{question}<span aria-hidden="true">›</span></button>)}
             </div>
             <details className="question-guide">
               <summary>질문을 더 정확하게 작성하는 방법</summary>
@@ -2054,13 +2180,21 @@ export default function Home() {
                 data-qa={message.role === "assistant" ? "assistant-message" : "user-message"}
                 data-qa-intent={message.role === "assistant" ? message.intent || undefined : undefined}
                 data-qa-capability={message.capabilityId || undefined}
+                data-qa-recommendation-source={message.recommendationSource || undefined}
                 data-qa-decision-source={message.role === "assistant" ? message.decisionSource || "DETERMINISTIC" : undefined}
+                data-qa-answer-origin={message.role === "assistant" ? message.answerOrigin || "INTERNAL_ENGINE" : undefined}
               >
                 {message.role === "assistant" && <span className="message-avatar">B</span>}
                 <div className="message-stack">
                   <div className="bubble">
                     {matched && <span className="answer-label">{matched.category}</span>}
-                    <p>{message.text}</p>
+                    {message.intent === "CLARIFY" ? (
+                      <div className="clarification-card" data-qa="clarification-card">
+                        <span>추가 확인</span>
+                        <strong>목적을 조금 더 알려주세요.</strong>
+                        <p>{message.text}</p>
+                      </div>
+                    ) : <p>{message.text}</p>}
                     {message.apiRedirect && <div className="api-redirect"><button type="button" data-qa="action-button" data-qa-action="OPEN_API_REDIRECT" onClick={() => emitHostAction({ type: "OPEN_URL", label: "뉴스토어 OPEN API 확인", url: OPEN_API_PURCHASE_URL })}>뉴스토어 OPEN API 확인 ↗</button></div>}
                     {message.articleLookupCase && <div className="article-lookup-card" data-qa="lookup-case" data-qa-ready={message.articleLookupCase.status === "READY" ? "true" : "false"} data-qa-lookup-status={message.lookupResultStatus || undefined}><strong>자료 찾기 조건</strong><dl>{[
                       ["기간", message.articleLookupCase.period.originalText || (message.articleLookupCase.period.from ? `${message.articleLookupCase.period.from} ~ ${message.articleLookupCase.period.to}` : "")],
@@ -2122,7 +2256,7 @@ export default function Home() {
                       <small>문의 원문과 개인정보는 기록에 저장하지 않고 이슈 요약만 보관합니다.</small>
                     </div>}
                     {message.supportDiagnostics?.map((flow) => <div className="diagnostic-flow" key={flow.kind}><strong>{flow.title}</strong><div>{flow.options.map((option) => <button type="button" key={option.label} onClick={() => ask(option.question)}>{option.label}</button>)}</div></div>)}
-                    {message.capabilities && <div className="capability-answer"><strong>추천 기능</strong>{message.capabilities.map((capability) => {
+                    {message.capabilities && <div className="capability-answer recommendation-card" data-qa="assistant-recommendation-card" data-qa-recommendation-source={message.recommendationSource || "CONTEXT_RULE"}><strong>추천 기능</strong>{message.capabilities.map((capability) => {
                       const source = capability.sourceIds.map((id) => knowledge.find((item) => item.id === id)).find(Boolean);
                       return <article key={capability.id}><div><b>{capability.label}</b><p>{capability.description}</p></div><div><button type="button" onClick={() => ask(`${capability.label} 사용법을 알려줘`)}>사용법 보기</button><a href={source?.source?.url ?? FAQ_SOURCE_URL} target="_blank" rel="noreferrer">공식 근거 ↗</a></div></article>;
                     })}</div>}
@@ -2146,6 +2280,10 @@ export default function Home() {
                     )}
                     {message.diagnostic && <div className="diagnostic-flow"><strong>{message.diagnostic.title}</strong><div>{message.diagnostic.options.map((option) => <button type="button" key={option.label} onClick={() => ask(option.question)}>{option.label}</button>)}</div></div>}
                     {message.actions && message.actions.length > 0 && <div className="message-actions" aria-label="다음 행동">{message.actions.map((action) => <button type="button" data-qa="action-button" data-qa-action={action.type} key={action.id} onClick={() => handleMessageAction(action)}>{action.label}</button>)}</div>}
+                    {message.role === "assistant" && <div className="provenance-badges" aria-label="답변 생성 방식">
+                      {message.decisionSource === "LLM" && <small className="provenance-badge ai-routing">AI 해석</small>}
+                      <small className={`provenance-badge answer-origin-badge ${message.answerOrigin === "LLM_GENERATED" ? "ai-origin" : "engine-origin"}`}>{message.answerOrigin === "LLM_GENERATED" ? (matched ? "AI 생성 · 공식 근거 참조" : "AI 생성 답변") : (matched ? "공식 근거·내부엔진" : "내부엔진")}</small>
+                    </div>}
                   </div>
 
                   {matched && (
@@ -2255,10 +2393,9 @@ export default function Home() {
       {!embedded && !chatOpen && showChatTeaser && (
         <div className="chat-teaser" data-qa="chat-teaser">
           <button className="chat-teaser-main" type="button" data-qa="chat-teaser-main" onClick={openChat}>
-            <span className="chat-teaser-accent" aria-hidden="true">⚡</span>
             <span>
-              <strong>빅카인즈 이용 중 궁금한 점이 있나요?</strong>
-              <span>검색·분석·이용 방법을 빠르게 안내해 드려요.</span>
+              <strong>사용 중 불편한 점이 있나요?</strong>
+              <span className="chat-teaser-subline"><span className="chat-teaser-accent" aria-hidden="true">⚡</span>빠르게 답변 받을 수 있어요</span>
             </span>
           </button>
           <button className="chat-teaser-close" type="button" data-qa="chat-teaser-close" onClick={(event) => { event.stopPropagation(); dismissChatTeaser(); }} aria-label="안내 말풍선 닫기">×</button>
@@ -2266,7 +2403,7 @@ export default function Home() {
       )}
       {!embedded && !chatOpen && (
         <button className="page-launcher" type="button" data-qa="chat-launcher" onClick={openChat} aria-label="빅카인즈 이용 도우미 열기">
-          B<span aria-hidden="true" />
+          B<span className="launcher-tooltip" aria-hidden="true">이용 도우미</span>
         </button>
       )}
     </main>

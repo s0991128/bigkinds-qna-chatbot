@@ -12,7 +12,9 @@ export function detectDiagnosticKind(question: string, pageType: PageType): Diag
   const supportIssue = detectSupportIssues(question)[0];
   if (supportIssue) return supportIssue;
   if (/검색결과|검색이 안|결과가 없|검색 안|검색이 되지|검색 버튼/.test(text) && (pageType === "NEWS_SEARCH" || /검색|결과/.test(text))) return "SEARCH_NO_RESULT";
-  if (/다운로드|내려받|엑셀|파일.*안/.test(text)) return "DOWNLOAD_PROBLEM";
+  const downloadCue = /다운로드|내려받|엑셀|excel|csv|파일/.test(text);
+  const downloadProblemCue = /안\s*(?:돼|되|보여|나와|열려|됨)|않|오류|에러|실패|문제|이상|막혀|작동|반응|못\s*(?:받|열)|열리지|깨져|끊겨|멈춰|0\s*건/.test(text);
+  if (downloadCue && downloadProblemCue) return "DOWNLOAD_PROBLEM";
   return null;
 }
 

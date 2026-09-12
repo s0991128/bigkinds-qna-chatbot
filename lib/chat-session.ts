@@ -3,10 +3,11 @@ import type { Capability } from "./capabilities";
 import type { DiagnosticFlow } from "./diagnostic-flows";
 import type { SearchDiagnosis } from "./search-diagnostics";
 import type { AiSuggestedTerms } from "./ai/types";
-import type { AiTask, DecisionSource } from "./ai/types";
+import type { AiTask, AnswerOrigin, DecisionSource } from "./ai/types";
 import type { ArticleLookupContext, ArticleLookupHistorySummary } from "./article-lookup";
 import type { LookupStrategy } from "./article-lookup-strategy";
 import type { SupportCaseSummary } from "./support-case";
+import type { RecommendationSource } from "./recommendation-engine";
 
 export const ACTIVE_CHAT_SESSION_KEY = "bigkinds-active-chat-session-v1";
 export const CHAT_SESSIONS_KEY = "bigkinds-chat-sessions-v1";
@@ -55,6 +56,8 @@ export type PersistedChatMessage = {
   capabilities?: Capability[];
   suggestedTerms?: AiSuggestedTerms[];
   decisionSource?: DecisionSource;
+  recommendationSource?: RecommendationSource;
+  answerOrigin?: AnswerOrigin;
   aiTask?: AiTask;
   aiAvailable?: boolean;
   createdAt?: string;
