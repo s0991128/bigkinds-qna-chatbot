@@ -8,6 +8,7 @@ import type { ArticleLookupContext, ArticleLookupHistorySummary } from "./articl
 import type { LookupStrategy } from "./article-lookup-strategy";
 import type { SupportCaseSummary } from "./support-case";
 import type { RecommendationSource } from "./recommendation-engine";
+import type { BigKindsSearchTransfer } from "./bigkinds-search-bridge";
 
 export const ACTIVE_CHAT_SESSION_KEY = "bigkinds-active-chat-session-v1";
 export const CHAT_SESSIONS_KEY = "bigkinds-chat-sessions-v1";
@@ -27,6 +28,7 @@ export type PersistedMessageAction = {
   type: string;
   value?: string;
   url?: string;
+  searchTransfer?: BigKindsSearchTransfer;
 };
 
 export type PersistedChatMessage = {
@@ -131,7 +133,7 @@ export function createChatSession(now = new Date().toISOString()): ChatSession {
       searchRevision: 0,
       searchStartedAt: null,
       searchContext: { status: "STALE", input: null, query: null, source: null, revision: 0, updatedAt: null },
-      articleLookupContext: { currentCase: null, selectedStrategyId: null, lastResultStatus: null },
+      articleLookupContext: { currentCase: null, selectedStrategyId: null, lastResultStatus: null, editPending: false },
     },
   };
 }
@@ -147,12 +149,24 @@ function isChatSession(value: unknown): value is ChatSession {
     && Boolean(record.workingState && typeof record.workingState === "object");
 }
 
+function normalizeChatSession(session: ChatSession): ChatSession {
+  const context = session.workingState.articleLookupContext;
+  if (!context) return session;
+  return {
+    ...session,
+    workingState: {
+      ...session.workingState,
+      articleLookupContext: { ...context, editPending: context.editPending ?? false },
+    },
+  };
+}
+
 export function loadActiveChatSession(storage?: Storage): ChatSession | null {
   const target = storageOrDefault(storage, "session");
   if (!target) return null;
   try {
     const parsed = JSON.parse(target.getItem(ACTIVE_CHAT_SESSION_KEY) || "null");
-    return isChatSession(parsed) ? parsed : null;
+    return isChatSession(parsed) ? normalizeChatSession(parsed) : null;
   } catch {
     return null;
   }
@@ -191,7 +205,7 @@ export function loadChatSessions(storage?: Storage): ChatSession[] {
     const parsed = JSON.parse(target.getItem(CHAT_SESSIONS_KEY) || "[]");
     const cutoff = Date.now() - CHAT_HISTORY_RETENTION_MS;
     const sessions = Array.isArray(parsed)
-      ? parsed.filter(isChatSession).filter((session) => Date.parse(session.closedAt || session.updatedAt) >= cutoff)
+      ? parsed.filter(isChatSession).map(normalizeChatSession).filter((session) => Date.parse(session.closedAt || session.updatedAt) >= cutoff)
       : [];
     target.setItem(CHAT_SESSIONS_KEY, JSON.stringify(sessions));
     return sessions;
@@ -216,7 +230,7 @@ export function archiveChatSession(session: ChatSession, storage?: Storage): Cha
     workingState: {
       ...session.workingState,
       articleLookupContext: session.workingState.articleLookupContext
-        ? { ...session.workingState.articleLookupContext, currentCase: null, selectedStrategyId: null }
+        ? { ...session.workingState.articleLookupContext, currentCase: null, selectedStrategyId: null, lastResultStatus: null, editPending: false }
         : undefined,
     },
   };

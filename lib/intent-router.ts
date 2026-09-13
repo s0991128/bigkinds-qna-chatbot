@@ -57,6 +57,7 @@ export type IntentRouteContext = {
   searchContext?: SearchContext | null;
   lastCapabilityId?: string | null;
   hasArticleLookupContext?: boolean;
+  articleLookupEditPending?: boolean;
 };
 
 const sensitivePattern = /(?:주민\s*등록\s*번호|\b\d{6}[-\s]\d{7}\b|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|(?:01[016789]|02|0[3-6][1-5])[-\s]?\d{3,4}[-\s]?\d{4}|비밀번호|password|인증키|api\s*key|apikey|bearer\s+[A-Za-z0-9._-]+)/i;
@@ -64,7 +65,7 @@ const sensitivePattern = /(?:주민\s*등록\s*번호|\b\d{6}[-\s]\d{7}\b|[\w.+-
 export function routeUserIntent(question: string, context: IntentRouteContext): IntentRoute {
   const clean = question.trim();
   const historicalLookup = isHistoricalArticleLookupQuestion(clean);
-  const lookupUpdate = Boolean(context.hasArticleLookupContext && isArticleLookupUpdateQuestion(clean));
+  const lookupUpdate = Boolean(context.hasArticleLookupContext && (context.articleLookupEditPending || isArticleLookupUpdateQuestion(clean)));
   if (isOpenApiQuestion(clean)) return { intent: "OPEN_API_REDIRECT" };
   if (sensitivePattern.test(clean) && !historicalLookup && !lookupUpdate) return { intent: "CLARIFY", sensitive: true };
   if (isFullTextDownloadQuestion(clean)) return { intent: "SERVICE_FACT" };
@@ -73,6 +74,7 @@ export function routeUserIntent(question: string, context: IntentRouteContext): 
   if (supportIssues.length && !onlyLegacySearchNoResult) return { intent: "SUPPORT_TRIAGE", supportIssues };
   if (isArticleContentQuestion(clean)) return { intent: "ARTICLE_UNSUPPORTED" };
   if (isChatbotMetaQuestion(clean)) return { intent: "META" };
+  if (historicalLookup || lookupUpdate) return { intent: "HISTORICAL_ARTICLE_LOOKUP", articleLookupUpdate: lookupUpdate };
   if (isServiceOverviewQuestion(clean)) return { intent: "SERVICE_OVERVIEW" };
   if (isServiceGuideQuestion(clean)) {
     const capabilityIds = context.lastCapabilityId
@@ -81,7 +83,6 @@ export function routeUserIntent(question: string, context: IntentRouteContext): 
     return { intent: "SERVICE_GUIDE", capabilityIds: capabilityIds.length ? capabilityIds : undefined };
   }
   if (isServiceFactQuestion(clean)) return { intent: "SERVICE_FACT" };
-  if (historicalLookup || lookupUpdate) return { intent: "HISTORICAL_ARTICLE_LOOKUP", articleLookupUpdate: lookupUpdate };
   if (isSearchExpressionDiagnosisQuestion(clean)) return { intent: "SEARCH_EXPRESSION_DIAGNOSIS" };
   if (isSearchDiagnosisQuestion(clean)) return { intent: "SEARCH_RESULT_DIAGNOSIS" };
   if (isSearchExpressionBuildQuestion(clean)) return { intent: "SEARCH_NEW" };

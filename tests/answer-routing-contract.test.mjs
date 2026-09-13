@@ -11,6 +11,8 @@ const insights = await readFile(new URL("../lib/insights.ts", import.meta.url), 
 const manual = await readFile(new URL("../public/data/manual-knowledge.js", import.meta.url), "utf8");
 const intents = await readFile(new URL("../lib/question-intents.ts", import.meta.url), "utf8");
 const diagnostics = await readFile(new URL("../lib/diagnostic-flows.ts", import.meta.url), "utf8");
+const searchBridge = await readFile(new URL("../lib/bigkinds-search-bridge.ts", import.meta.url), "utf8");
+const widget = await readFile(new URL("../public/bigkinds-chatbot.js", import.meta.url), "utf8");
 
 test("duplicate-answer display removes the summary paragraph and hides an empty details control", () => {
   assert.match(answerModel, /item\.summary\?\.trim\(\) \|\| paragraphs\[0\] \|\| item\.question/);
@@ -93,4 +95,21 @@ test("full-text download questions use the canonical service fact path", () => {
   assert.match(page, /const fullTextDownload = isFullTextDownloadQuestion\(cleanQuestion\)/);
   assert.match(diagnostics, /const downloadCue/);
   assert.match(diagnostics, /const downloadProblemCue/);
+});
+
+test("historical search actions keep query, period, and provider filters together", () => {
+  assert.match(searchBridge, /export type BigKindsSearchTransfer/);
+  assert.match(searchBridge, /export function createSearchTransfer/);
+  assert.match(searchBridge, /providerCodes/);
+  assert.match(page, /searchTransfer: createSearchTransfer\(strategy\)/);
+  assert.match(widget, /action\.searchTransfer/);
+  assert.match(widget, /startDate: transfer\.startDate/);
+  assert.match(widget, /endDate: transfer\.endDate/);
+});
+
+test("historical condition edit has an explicit pending state", () => {
+  assert.match(page, /articleLookupEditPending: Boolean\(aiStateRef\.current\.articleLookupContext\.editPending\)/);
+  assert.match(page, /articleLookupContext: \{ \.\.\.currentContext, editPending: true \}/);
+  assert.match(page, /selectedStrategyId: null,\s*lastResultStatus: null,\s*editPending: false/);
+  assert.match(searchBridge, /매일경제: "02100101"/);
 });

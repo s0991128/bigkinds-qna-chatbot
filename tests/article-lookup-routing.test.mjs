@@ -54,3 +54,9 @@ test("lookup updates are separate from SearchContext updates", () => {
   assert.equal(route.intent, "HISTORICAL_ARTICLE_LOOKUP");
   assert.equal(route.articleLookupUpdate, true);
 });
+
+test("edit-pending routes the next free-form input back to the active lookup case", () => {
+  const route = router.routeUserIntent("아시아나항공도 검색어에 넣어줘", { ...base, hasArticleLookupContext: true, articleLookupEditPending: true });
+  assert.equal(route.intent, "HISTORICAL_ARTICLE_LOOKUP");
+  assert.equal(route.articleLookupUpdate, true);
+});

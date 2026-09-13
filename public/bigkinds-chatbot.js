@@ -81,9 +81,36 @@
     if (iframe && iframe.contentWindow) iframe.contentWindow.postMessage({ type: "bigkinds-chatbot-context", context: pageContext() }, chatbotOrigin);
   }
 
-  function openBigKindsSearch(query) {
-    var searchKey = String(query || "").trim();
+  var providerCodes = {
+    "경향신문": "01100101",
+    "동아일보": "01100401",
+    "조선일보": "01100801",
+    "중앙일보": "01100901",
+    "한겨레": "01101001",
+    "매일경제": "02100101",
+    "한국경제": "02100601"
+  };
+
+  function resolveProviderCodes(names) {
+    var seen = {};
+    return (Array.isArray(names) ? names : []).map(function (name) {
+      return String(name || "").trim().replace(/\s+/g, "");
+    }).map(function (name) {
+      return providerCodes[name] || "";
+    }).filter(function (code) {
+      if (!code || seen[code]) return false;
+      seen[code] = true;
+      return true;
+    });
+  }
+
+  function openBigKindsSearch(input) {
+    var transfer = typeof input === "string" ? { query: input } : (input || {});
+    var searchKey = String(transfer.query || "").trim();
     if (!searchKey) return;
+
+    var directProviderCodes = Array.isArray(transfer.providerCodes) ? transfer.providerCodes.filter(Boolean) : [];
+    var selectedProviderCodes = directProviderCodes.length ? directProviderCodes : resolveProviderCodes(transfer.providerNames);
 
     var form = document.createElement("form");
     form.method = "post";
@@ -92,10 +119,10 @@
     form.acceptCharset = "UTF-8";
     form.style.display = "none";
 
-    var input = document.createElement("input");
-    input.type = "hidden";
-    input.name = "jsonSearchParam";
-    input.value = JSON.stringify({
+    var formInput = document.createElement("input");
+    formInput.type = "hidden";
+    formInput.name = "jsonSearchParam";
+    formInput.value = JSON.stringify({
       indexName: "news",
       searchKey: searchKey,
       searchKeys: [{}],
@@ -103,14 +130,14 @@
       searchScopeType: "1",
       searchSortType: "date",
       sortMethod: "date",
-      startDate: "",
-      endDate: "",
-      providerCodes: [],
+      startDate: transfer.startDate || "",
+      endDate: transfer.endDate || "",
+      providerCodes: selectedProviderCodes,
       categoryCodes: [],
       incidentCodes: [],
       dateCodes: []
     });
-    form.appendChild(input);
+    form.appendChild(formInput);
     document.body.appendChild(form);
     form.submit();
     window.setTimeout(function () { form.remove(); }, 0);
@@ -138,11 +165,15 @@
       var adapter = window.BIGKINDS_CHATBOT_ADAPTER;
       var method = { APPLY_SEARCH_QUERY: "applySearchQuery", OPEN_URL: "openUrl", OPEN_QNA: "openQna", OPEN_FAQ: "openFaq", OPEN_API: "openApi" }[action.type];
       if (adapter && method && typeof adapter[method] === "function") {
-        adapter[method](action.value || action.url || "");
+        if (action.type === "APPLY_SEARCH_QUERY") {
+          adapter[method](action.value || (action.searchTransfer && action.searchTransfer.query) || "", action.searchTransfer || null);
+        } else {
+          adapter[method](action.value || action.url || "");
+        }
         return;
       }
-      if (action.type === "APPLY_SEARCH_QUERY" && action.value) {
-        openBigKindsSearch(action.value);
+      if (action.type === "APPLY_SEARCH_QUERY" && (action.searchTransfer || action.value)) {
+        openBigKindsSearch(action.searchTransfer || action.value);
         return;
       }
       if (action.type === "OPEN_URL" || action.type === "OPEN_QNA" || action.type === "OPEN_FAQ" || action.type === "OPEN_API") {

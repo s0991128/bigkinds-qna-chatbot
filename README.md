@@ -86,12 +86,12 @@ Gemini 키는 [Google AI Studio API 키 페이지](https://aistudio.google.com/a
 
 ## Service Copilot 연동
 
-`public/bigkinds-chatbot.js`는 현재 BIGKinds pathname만 최소 context로 iframe에 전달합니다. 검색어·이름·이메일·회원번호·API Key는 전달하지 않습니다. 실제 BIGKinds 화면에서 검색식을 적용하려면 호스트 페이지에 다음 adapter를 연결할 수 있습니다.
+`public/bigkinds-chatbot.js`는 현재 BIGKinds pathname만 최소 context로 iframe에 전달합니다. 검색어·이름·이메일·회원번호·API Key는 전달하지 않습니다. 실제 BIGKinds 화면에서 검색식을 적용하려면 호스트 페이지에 다음 adapter를 연결할 수 있습니다. `applySearchQuery`의 두 번째 인자로 선택적 검색 전달값(기간·언론사 코드)을 함께 받습니다.
 
 ```js
 window.BIGKINDS_CHATBOT_ADAPTER = {
-  applySearchQuery(query) { /* BIGKinds 검색 화면의 공식 연동 지점 */ },
+  applySearchQuery(query, searchTransfer) { /* BIGKinds 검색 화면의 공식 연동 지점 */ },
 };
 ```
 
-adapter가 없으면 검색식 적용 요청을 `jsonSearchParam` POST 형식으로 공식 뉴스 검색 화면에 전달하고, 그 외 동작은 `bigkinds-chatbot-action` CustomEvent로 전달합니다. Q&A escalation 기본 주소는 `https://www.bigkinds.or.kr/news/qnaList.do`입니다.
+`searchTransfer`는 `{ query, startDate, endDate, providerNames, providerCodes }` 형태이며, providerCodes는 BIGKinds 공식 제공자 코드만 사용합니다. adapter가 없으면 검색식 적용 요청을 이 전달값 그대로 `jsonSearchParam` POST 형식으로 공식 뉴스 검색 화면에 전달하고, 그 외 동작은 `bigkinds-chatbot-action` CustomEvent로 전달합니다. Q&A escalation 기본 주소는 `https://www.bigkinds.or.kr/news/qnaList.do`입니다.

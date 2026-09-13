@@ -67,6 +67,26 @@ test("period handling uses a deterministic month range and widening range", () =
   assert.equal(expanded?.dateTo, "1997-08-31");
 });
 
+test("historical lookup parses an explicit month range", () => {
+  const articleCase = lookup.extractArticleLookupCase("1997년 6~8월 매일경제 아시아나 표창 명단을 찾아줘", "2026-09-09T00:00:00.000Z");
+  assert.equal(articleCase.period.precision, "APPROXIMATE");
+  assert.equal(articleCase.period.from, "1997-06-01");
+  assert.equal(articleCase.period.to, "1997-08-31");
+});
+
+test("lookup updates retain the existing year and replace media when requested", () => {
+  const current = lookup.extractArticleLookupCase("1997년 7월경 한국경제와 조선일보의 아시아나 자료를 찾아줘", "2026-09-09T00:00:00.000Z");
+  const updated = lookup.updateArticleLookupCase(current, "기간을 6~8월로 바꿔줘, 언론사는 매일경제만, 아시아나항공도 검색어에 넣어줘", "2026-09-09T00:00:00.000Z");
+  assert.equal(updated.period.from, "1997-06-01");
+  assert.equal(updated.period.to, "1997-08-31");
+  assert.deepEqual(updated.media, ["매일경제"]);
+  assert.ok(updated.organizations.includes("아시아나항공"));
+  assert.ok(updated.keywords.includes("아시아나항공"));
+  const regenerated = strategies.buildLookupStrategies(updated);
+  assert.ok(regenerated.length > 0);
+  assert.ok(regenerated.every((item) => item.dateFrom === "1997-06-01" && item.dateTo === "1997-08-31" && item.media?.join(",") === "매일경제"));
+});
+
 test("every lookup strategy query is built by the shared search query builder", () => {
   const articleCase = lookup.extractArticleLookupCase("1997년 7월 매일경제 아시아나 노동부장관 표창 명단", "2026-09-09T00:00:00.000Z");
   const items = strategies.buildLookupStrategies(articleCase);

@@ -23,6 +23,7 @@ export type ArticleLookupContext = {
   currentCase: ArticleLookupCase | null;
   selectedStrategyId: string | null;
   lastResultStatus: ArticleLookupResultStatus | null;
+  editPending: boolean;
 };
 
 export type ArticleLookupHistorySummary = Pick<ArticleLookupCase, "period" | "media" | "organizations" | "events" | "materialType" | "pageHints" | "status">;
@@ -63,6 +64,16 @@ function extractPeriod(value: string): ArticleLookupCase["period"] {
     if (month >= 1 && month <= 12 && day >= 1 && day <= lastDay(year, month)) {
       const date = dateText(year, month, day);
       return { from: date, to: date, originalText: exact[0], precision: "EXACT" };
+    }
+  }
+
+  const monthRangeMatch = value.match(/(19\d{2}|20\d{2})년\s*(?:(?:기간|날짜)\s*(?:을|은|는|으로)?\s*)?(\d{1,2})월?\s*(?:~|～|-|–|—|부터)\s*(\d{1,2})월/);
+  if (monthRangeMatch) {
+    const year = Number(monthRangeMatch[1]);
+    const fromMonth = Number(monthRangeMatch[2]);
+    const toMonth = Number(monthRangeMatch[3]);
+    if (fromMonth >= 1 && fromMonth <= 12 && toMonth >= 1 && toMonth <= 12 && fromMonth <= toMonth) {
+      return { from: monthRange(year, fromMonth).from, to: monthRange(year, toMonth).to, originalText: monthRangeMatch[0], precision: "APPROXIMATE" };
     }
   }
 
@@ -169,7 +180,7 @@ export function isArticleLookupUpdateQuestion(question: string) {
 }
 
 export function emptyArticleLookupContext(): ArticleLookupContext {
-  return { currentCase: null, selectedStrategyId: null, lastResultStatus: null };
+  return { currentCase: null, selectedStrategyId: null, lastResultStatus: null, editPending: false };
 }
 
 export function updateArticleLookupCase(current: ArticleLookupCase, request: string, now = new Date().toISOString()): ArticleLookupCase {

@@ -25,6 +25,7 @@ import { applySearchTurn, createSearchContext, emptySearchContext, getSearchCont
 import type { SearchContext, SearchTurnResult } from "../lib/search-context";
 import { buildLookupStrategies, type LookupStrategy } from "../lib/article-lookup-strategy";
 import { createArticleLookupHistorySummary, createLookupReplyDraft, emptyArticleLookupContext, extractArticleLookupCase, isHistoricalArticleLookupQuestion, sanitizeLookupRequestForHistory, updateArticleLookupCase, type ArticleLookupCase, type ArticleLookupContext, type ArticleLookupResultStatus } from "../lib/article-lookup";
+import { buildBigKindsSearchPayload, createSearchTransfer, type BigKindsSearchTransfer } from "../lib/bigkinds-search-bridge";
 import { createSupportCase, summarizeSupportCase, summarizeSupportRequest, type SupportCase, type SupportIssueKind } from "../lib/support-case";
 import { detectSupportIssues, supportIssueLabel } from "../lib/support-routing";
 import { getPolicyHandoff, type PolicyHandoff } from "../lib/policy-safety";
@@ -143,33 +144,14 @@ function readChatStarted() {
 const QNA_SOURCE_URL = "https://www.bigkinds.or.kr/news/qnaList.do";
 const BIGKINDS_SEARCH_URL = "https://www.bigkinds.or.kr/v2/news/search.do";
 
-function buildBigKindsSearchPayload(query: string) {
-  const searchKey = query.trim();
-  return {
-    indexName: "news",
-    searchKey,
-    searchKeys: [{}],
-    searchFilterType: "1",
-    searchScopeType: "1",
-    searchSortType: "date",
-    sortMethod: "date",
-    startDate: "",
-    endDate: "",
-    providerCodes: [],
-    categoryCodes: [],
-    incidentCodes: [],
-    dateCodes: [],
-  };
-}
-
 /**
  * BIGKinds의 공식 검색 화면은 GET 쿼리스트링이 아니라
  * `jsonSearchParam` POST 필드로 검색 상태를 받습니다.
  * 독립 실행 화면에서도 이 계약을 그대로 사용해 검색어를 보존합니다.
  */
-function openBigKindsSearch(query: string) {
+function openBigKindsSearch(transfer: BigKindsSearchTransfer) {
   if (typeof document === "undefined") return;
-  const searchKey = query.trim();
+  const searchKey = transfer.query.trim();
   if (!searchKey) return;
 
   const form = document.createElement("form");
@@ -182,11 +164,15 @@ function openBigKindsSearch(query: string) {
   const input = document.createElement("input");
   input.type = "hidden";
   input.name = "jsonSearchParam";
-  input.value = JSON.stringify(buildBigKindsSearchPayload(searchKey));
+  input.value = JSON.stringify(buildBigKindsSearchPayload({ ...transfer, query: searchKey }));
   form.appendChild(input);
   document.body.appendChild(form);
   form.submit();
   window.setTimeout(() => form.remove(), 0);
+}
+
+function queryOnlyTransfer(query: string): BigKindsSearchTransfer {
+  return { query };
 }
 
 const materialTypeLabels: Record<ArticleLookupCase["materialType"], string> = {
@@ -407,6 +393,7 @@ export default function Home() {
       const restoredQuery = restoredContext?.query || restoredContext?.generatedQuery || state.lastGeneratedQuery || null;
       const restoredRevision = restoredContext?.revision ?? state.searchRevision ?? 0;
       const restoredUpdatedAt = restoredContext?.updatedAt || state.searchStartedAt || null;
+      const restoredLookup = state.articleLookupContext;
       aiStateRef.current = {
         lastIntent: (state.lastIntent as AiIntent | null) || null,
         lastSearchInput: restoredInput,
@@ -424,7 +411,9 @@ export default function Home() {
           revision: restoredRevision,
           updatedAt: restoredUpdatedAt,
         },
-        articleLookupContext: state.articleLookupContext || emptyArticleLookupContext(),
+        articleLookupContext: restoredLookup
+          ? { ...restoredLookup, editPending: restoredLookup.editPending ?? false }
+          : emptyArticleLookupContext(),
       };
       startTransition(() => {
         setMessages(restoredMessages);
@@ -704,10 +693,11 @@ export default function Home() {
     }
   }
 
-  function emitHostAction(action: { type: string; label?: string; url?: string; value?: string }) {
+  function emitHostAction(action: PersistedMessageAction) {
     if (window.parent === window) {
-      if (action.type === "APPLY_SEARCH_QUERY" && action.value) {
-        openBigKindsSearch(action.value);
+      const transfer = action.searchTransfer || (action.value ? queryOnlyTransfer(action.value) : null);
+      if (action.type === "APPLY_SEARCH_QUERY" && transfer) {
+        openBigKindsSearch(transfer);
         return;
       }
       if (action.type === "OPEN_URL" && action.url) window.open(action.url, "_blank", "noopener,noreferrer");
@@ -752,7 +742,7 @@ export default function Home() {
 
   function applySearchQuery() {
     if (!builtSearchQuery) return;
-    emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: builtSearchQuery });
+    emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: builtSearchQuery, searchTransfer: queryOnlyTransfer(builtSearchQuery) });
   }
 
   function handleFeedback(messageId: number, value: "up" | "down") {
@@ -1021,8 +1011,9 @@ export default function Home() {
       lastIntent: "HISTORICAL_ARTICLE_LOOKUP",
       articleLookupContext: {
         currentCase: articleLookupCase,
-        selectedStrategyId: isUpdate ? aiStateRef.current.articleLookupContext.selectedStrategyId : null,
-        lastResultStatus: isUpdate ? aiStateRef.current.articleLookupContext.lastResultStatus : null,
+        selectedStrategyId: null,
+        lastResultStatus: null,
+        editPending: false,
       },
     });
     setMessages((current) => [...current, {
@@ -1169,10 +1160,27 @@ export default function Home() {
     setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: prompt.text, intent: mode, actions: prompt.actions, ...engineAnswerMeta() }]);
   }
 
+  function requestArticleLookupEdit() {
+    const currentContext = aiStateRef.current.articleLookupContext;
+    setActiveMode("ARTICLE_LOOKUP");
+    updateWorkingState({
+      activeMode: "ARTICLE_LOOKUP",
+      lastIntent: "HISTORICAL_ARTICLE_LOOKUP",
+      articleLookupContext: { ...currentContext, editPending: true },
+    });
+    setMessages((current) => [...current, {
+      id: nextId.current++,
+      role: "assistant",
+      text: "수정할 조건을 입력해 주세요. 현재 자료 찾기 조건에 반영하겠습니다.\n예: 기간을 1997년 6~8월로 바꿔줘, 언론사는 매일경제만, 아시아나항공도 검색어에 넣어줘.",
+      intent: "HISTORICAL_ARTICLE_LOOKUP",
+      ...engineAnswerMeta(),
+    }]);
+  }
+
   function handleMessageAction(action: PersistedMessageAction) {
     if (action.type === "SET_MODE" && action.value) startMode(action.value as PurposeMode);
     else if (action.type === "CONFIRM_LOOKUP_CASE") showLookupStrategies();
-    else if (action.type === "EDIT_LOOKUP_CASE") setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "수정할 조건을 입력해 주세요.\n예: 기간을 1997년 6~8월로 바꿔줘, 언론사는 매일경제만, 아시아나항공도 검색어에 넣어줘.", intent: "ARTICLE_LOOKUP", ...engineAnswerMeta() }]);
+    else if (action.type === "EDIT_LOOKUP_CASE") requestArticleLookupEdit();
     else if (action.type === "RESET_ARTICLE_LOOKUP") resetArticleLookup();
     else if (action.type === "USE_LOOKUP_STRATEGY" && action.value) applyLookupStrategy(action.value);
     else if (action.type === "SET_LOOKUP_RESULT" && (action.value === "FOUND" || action.value === "NOT_FOUND" || action.value === "CANDIDATE")) setLookupResultStatus(action.value);
@@ -1454,6 +1462,7 @@ export default function Home() {
         lastCapabilityId: aiStateRef.current.lastCapabilityId,
         pageType: pageContext.pageType,
         hasArticleLookupContext: Boolean(aiStateRef.current.articleLookupContext.currentCase),
+        articleLookupEditPending: Boolean(aiStateRef.current.articleLookupContext.editPending),
       });
       if (sensitive || routed.sensitive) setDecisionTrace("HARD_RULE");
 
@@ -2281,7 +2290,7 @@ export default function Home() {
                       ["지면 단서", message.articleLookupCase.pageHints.join(", ")],
                       ["자료 형태", materialTypeLabels[message.articleLookupCase.materialType]],
                     ].filter(([, value]) => value).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div>}
-                    {message.lookupStrategies && message.lookupStrategies.length > 0 && <div className="lookup-strategies" data-qa="lookup-strategies"><strong>검색 전략</strong>{message.lookupStrategies.map((strategy, index) => <article key={strategy.id}><span>{index + 1}</span><div><b>{strategy.title}</b><p>{strategy.description}</p><code>{strategy.query}</code>{strategy.dateFrom && <small>기간 {strategy.dateFrom} ~ {strategy.dateTo}</small>}{strategy.media?.length ? <small>언론사 {strategy.media.join(", ")}</small> : null}{strategy.relatedSuggestions?.length ? <small>검색 범위를 넓히기 위한 관련 표현: {strategy.relatedSuggestions.join(", ")}</small> : null}<div><button type="button" data-qa="action-button" data-qa-action="COPY_QUERY" onClick={() => copyText(strategy.query)}>검색식 복사</button><button type="button" data-qa="action-button" data-qa-action="OPEN_SEARCH" onClick={() => emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "빅카인즈 검색화면 열기", value: strategy.query })}>빅카인즈에서 검색</button><button type="button" data-qa="action-button" data-qa-action="USE_LOOKUP_STRATEGY" onClick={() => applyLookupStrategy(strategy.id)}>이 전략 사용</button></div></div></article>)}</div>}
+                    {message.lookupStrategies && message.lookupStrategies.length > 0 && <div className="lookup-strategies" data-qa="lookup-strategies"><strong>검색 전략</strong>{message.lookupStrategies.map((strategy, index) => <article key={strategy.id}><span>{index + 1}</span><div><b>{strategy.title}</b><p>{strategy.description}</p><code>{strategy.query}</code>{strategy.dateFrom && <small>기간 {strategy.dateFrom} ~ {strategy.dateTo}</small>}{strategy.media?.length ? <small>언론사 {strategy.media.join(", ")}</small> : null}{strategy.relatedSuggestions?.length ? <small>검색 범위를 넓히기 위한 관련 표현: {strategy.relatedSuggestions.join(", ")}</small> : null}<div><button type="button" data-qa="action-button" data-qa-action="COPY_QUERY" onClick={() => copyText(strategy.query)}>검색식 복사</button><button type="button" data-qa="action-button" data-qa-action="OPEN_SEARCH" onClick={() => emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "빅카인즈 검색화면 열기", value: strategy.query, searchTransfer: createSearchTransfer(strategy) })}>빅카인즈에서 검색</button><button type="button" data-qa="action-button" data-qa-action="USE_LOOKUP_STRATEGY" onClick={() => applyLookupStrategy(strategy.id)}>이 전략 사용</button></div></div></article>)}</div>}
                     {message.replyDraft && <div className="lookup-reply-draft"><strong>문의 회신 초안</strong><p>{message.replyDraft}</p><button type="button" data-qa="action-button" data-qa-action="COPY_REPLY_DRAFT" onClick={() => copyText(message.replyDraft || "")}>초안 복사</button></div>}
                     {message.searchQuery && (
                       <div className="search-query-answer">
@@ -2301,7 +2310,7 @@ export default function Home() {
                         <p>{message.searchQuery.description}</p>
                         {message.suggestedTerms && message.suggestedTerms.length > 0 && <div className="suggested-term-panel"><span>관련 표현도 같이 검색할까요?</span>{message.suggestedTerms.map((suggestion) => <div key={suggestion.baseTerm} className="suggested-term-row"><b>{suggestion.baseTerm}</b>{suggestion.alternatives.map((term) => <button key={term} type="button" onClick={() => handleMessageAction({ id: `suggestion-${term}`, label: term, type: "USE_ALL_SUGGESTIONS", value: JSON.stringify(suggestion) })}>{term}</button>)}</div>)}</div>}
                         <div>
-                          <button type="button" onClick={() => emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: message.searchQuery?.value })}>검색창에 적용</button>
+                          <button type="button" onClick={() => message.searchQuery?.value && emitHostAction({ type: "APPLY_SEARCH_QUERY", label: "검색창에 적용", value: message.searchQuery.value, searchTransfer: queryOnlyTransfer(message.searchQuery.value) })}>검색창에 적용</button>
                           <button type="button" onClick={() => copyText(message.searchQuery?.value || "")}>검색식 복사</button>
                           <button type="button" onClick={() => setShowQueryBuilder(true)}>조건 수정</button>
                           <button type="button" onClick={() => ask("검색식 사용법을 알려줘")}>검색법 보기</button>

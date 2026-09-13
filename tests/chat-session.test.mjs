@@ -36,6 +36,15 @@ test("active session은 닫고 다시 열어도 messages와 workingState를 복�
   assert.deepEqual(session.loadActiveChatSession(storage), active);
 });
 
+test("구버전 active session은 Article Lookup editPending을 false로 보정한다", () => {
+  const storage = new MemoryStorage();
+  const active = session.createChatSession("2026-09-08T00:00:00.000Z");
+  delete active.workingState.articleLookupContext.editPending;
+  session.saveActiveChatSession(active, storage);
+  const restored = session.loadActiveChatSession(storage);
+  assert.equal(restored?.workingState.articleLookupContext?.editPending, false);
+});
+
 test("동일 session id는 archive를 여러 번 해도 하나로 upsert된다", () => {
   const storage = new MemoryStorage();
   const active = session.createChatSession();
@@ -67,6 +76,7 @@ test("archive는 Article Lookup 인물명과 검색 전략을 History에 보관�
   const archived = session.loadChatSessions(storage)[0];
   assert.equal(archived.messages[1].lookupStrategies, undefined);
   assert.equal(archived.workingState.articleLookupContext.currentCase, null);
+  assert.equal(archived.workingState.articleLookupContext.editPending, false);
   assert.doesNotMatch(JSON.stringify(archived), /홍길동/);
 });
 
