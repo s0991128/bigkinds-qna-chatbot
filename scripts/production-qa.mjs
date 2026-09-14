@@ -319,7 +319,7 @@ async function launchChrome(chromePath) {
   };
 }
 
-async function prepare(page) {
+async function preparePage(page) {
   const cleanUrl = new URL(baseUrl);
   cleanUrl.searchParams.set("qa-run", `${Date.now()}`);
   const storageReset = await page.send("Page.addScriptToEvaluateOnNewDocument", {
@@ -328,6 +328,9 @@ async function prepare(page) {
   await page.navigate(cleanUrl.toString());
   await page.waitFor("document.querySelector('[data-qa-ready=\\\"true\\\"]') !== null", 60000, "initial app readiness");
   if (storageReset.identifier) await page.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: storageReset.identifier });
+}
+
+async function openChatForQa(page) {
   if (await page.exists('[data-qa="chat-launcher"]')) {
     await page.click('[data-qa="chat-launcher"]');
   }
@@ -378,7 +381,10 @@ async function runScenario(page, scenario) {
   const consoleStart = page.consoleErrors.length;
   const result = { id: scenario.id, name: scenario.name, status: "PASS", durationMs: 0, consoleErrors: [] };
   try {
-    await prepare(page);
+    await preparePage(page);
+    if (scenario.openChat !== false) {
+      await openChatForQa(page);
+    }
     await scenario.run(page, result);
   } catch (error) {
     result.status = "FAIL";
@@ -465,7 +471,8 @@ async function main() {
       { id: "PC05", name: "BIGKinds trend topic recommends keyword trend", run: async (p) => { await ask(p, "빅카인즈에 대한 보도량 추이를 보고 싶어요"); await expectIntent(p, "FEATURE_RECOMMENDATION"); await p.waitFor("document.querySelector('[data-qa-capability=\"KEYWORD_TREND\"]') !== null", 10000, "keyword trend capability"); await p.waitFor("document.querySelector('[data-qa=\"assistant-recommendation-card\"]') !== null", 10000, "recommendation card"); } },
       { id: "PC06", name: "platform phrase and topic preserve one BIGKinds term", run: async (p) => { await ask(p, "빅카인즈에서 빅카인즈 관련 기사를 찾아줘"); await expectIntent(p, "SEARCH_NEW"); await expectSearchQuery(p, "빅카인즈"); } },
       { id: "UX01", name: "standalone shell uses launcher instead of hero search", run: async (p) => { await closeChat(p); assert.equal(await p.exists('[data-qa="hero-question-input"]'), false, "standalone hero input should be absent"); assert.equal(await p.exists('[data-qa="quick-start"]'), false, "standalone quick start should be absent"); assert.equal(await p.exists('[data-qa="hero-open-chat"]'), true, "hero open-chat CTA is missing"); assert.equal(await p.exists('[data-qa="chat-launcher"]'), true, "floating launcher is missing"); } },
-      { id: "UX02", name: "session teaser can be dismissed", run: async (p) => { await closeChat(p); await p.waitFor("document.querySelector('[data-qa=\"chat-teaser\"]') !== null", 3000, "session teaser"); const teaserText = await p.text('[data-qa="chat-teaser"]'); expectIncludes(teaserText, "사용 중 불편한 점이 있나요?", "teaser title"); expectIncludes(teaserText, "빠르게 답변 받을 수 있어요", "teaser subtitle"); await p.click('[data-qa="chat-teaser-close"]'); await p.waitFor("document.querySelector('[data-qa=\"chat-teaser\"]') === null", 3000, "teaser dismissed"); } },
+      { id: "UX02", name: "session teaser can be dismissed", openChat: false, run: async (p) => { assert.equal(await p.exists('[data-qa="chat-widget"]'), false, "first visit should start with chat closed"); assert.equal(await p.exists('[data-qa="chat-launcher"]'), true, "launcher is missing on first visit"); await p.waitFor("document.querySelector('[data-qa=\"chat-teaser\"]') !== null", 3000, "session teaser"); const teaserText = await p.text('[data-qa="chat-teaser"]'); expectIncludes(teaserText, "사용 중 불편한 점이 있나요?", "teaser title"); expectIncludes(teaserText, "빠르게 답변 받을 수 있어요", "teaser subtitle"); await p.click('[data-qa="chat-teaser-close"]'); await p.waitFor("document.querySelector('[data-qa=\"chat-teaser\"]') === null", 3000, "teaser dismissed"); assert.equal(await p.exists('[data-qa="chat-launcher"].chat-launcher--glow'), true, "teaser dismissal should not mark chat started"); } },
+      { id: "UX09", name: "launcher unread indicator disappears after first chat open", openChat: false, run: async (p) => { assert.equal(await p.exists('[data-qa="chat-launcher"]'), true, "launcher is missing on first visit"); assert.equal(await p.exists('[data-qa="chat-launcher"].chat-launcher--glow'), true, "first-visit launcher indicator is missing"); await openChatForQa(p); await p.waitFor("sessionStorage.getItem('bigkinds-chat-started') === '1'", 3000, "chat started state"); await closeChat(p); assert.equal(await p.exists('[data-qa="chat-launcher"]'), true, "launcher should return after close"); assert.equal(await p.exists('[data-qa="chat-launcher"].chat-launcher--glow'), false, "indicator should disappear after chat starts"); await p.navigate(`${baseUrl}/?embed=0&qa-run=${Date.now()}`); await p.waitFor("document.querySelector('[data-qa-ready=\"true\"]') !== null", 60000, "reload readiness"); await p.waitFor("document.querySelector('[data-qa=\"chat-launcher\"]') !== null", 5000, "launcher after reload"); assert.equal(await p.exists('[data-qa="chat-launcher"].chat-launcher--glow'), false, "indicator should stay hidden after reload"); assert.equal(await p.exists('[data-qa="chat-teaser"]'), false, "teaser should not return after chat starts"); } },
       { id: "UX03", name: "page context updates recommendations", run: async (p) => { await p.evaluate("window.postMessage({ type: 'bigkinds-chatbot-context', context: { pathname: '/v2/news/search.do', pageType: 'NEWS_SEARCH' } }, '*')"); await p.waitFor("document.querySelector('.context-note')?.textContent.includes('뉴스 검색')", 5000, "news search context"); await p.waitFor("document.querySelector('[data-qa=\"purpose-primary-item\"]') !== null", 5000, "contextual primary recommendations"); } },
       { id: "UX04", name: "purpose panel has primary and secondary actions", run: async (p) => { await p.waitFor("document.querySelectorAll('[data-qa=\"purpose-primary-item\"]').length === 4", 10000, "four primary purposes"); await p.waitFor("document.querySelectorAll('[data-qa=\"purpose-secondary\"] button').length === 3", 10000, "three secondary actions"); } },
       { id: "UX05", name: "feature recommendation card has provenance", run: async (p) => { await ask(p, "빅카인즈에 대한 보도량 추이를 보고 싶어요"); await expectIntent(p, "FEATURE_RECOMMENDATION"); await p.waitFor("document.querySelector('[data-qa=\"assistant-recommendation-card\"]') !== null", 10000, "recommendation card"); await p.waitFor("document.querySelector('[data-qa=\"assistant-recommendation-card\"]')?.getAttribute('data-qa-recommendation-source') === 'CONTEXT_RULE'", 10000, "recommendation provenance"); } },
@@ -483,14 +490,16 @@ async function main() {
     }
 
     report.buttons.push(await runButtonCheck(page, "purpose-menu", async () => {
-      await prepare(page);
+      await preparePage(page);
+      await openChatForQa(page);
       if (await page.exists('[data-qa="purpose-menu"]')) await page.click('[data-qa="purpose-toggle"]');
       await page.waitFor("document.querySelector('[data-qa=\\\"purpose-menu\\\"]') === null", 5000, "purpose menu close");
       await page.click('[data-qa="purpose-toggle"]');
       await page.waitFor("document.querySelector('[data-qa=\\\"purpose-menu\\\"]') !== null", 5000, "purpose menu");
     }));
     report.buttons.push(await runButtonCheck(page, "query-actions", async () => {
-      await prepare(page);
+      await preparePage(page);
+      await openChatForQa(page);
       await ask(page, "AI 반도체 관련 기사를 찾고 싶어요");
       await page.stubClipboard();
       await page.clickByText("검색식 복사", { exact: true });
@@ -502,7 +511,8 @@ async function main() {
       await page.waitFor("window.__QA_OPENED_URL__ !== ''", 5000, "news search action");
     }));
     report.buttons.push(await runButtonCheck(page, "lookup-actions", async () => {
-      await prepare(page);
+      await preparePage(page);
+      await openChatForQa(page);
       await ask(page, "1997년 7월 신문에 실린 수상자 명단을 찾고 싶어");
       await page.clickByText("이 조건으로 찾기", { exact: true });
       await page.clickByText("이 전략 사용", { exact: true });
@@ -511,7 +521,8 @@ async function main() {
       await page.waitFor("document.querySelector('.lookup-reply-draft') !== null", 5000, "lookup reply draft");
     }));
     report.buttons.push(await runButtonCheck(page, "support-actions", async () => {
-      await prepare(page);
+      await preparePage(page);
+      await openChatForQa(page);
       await ask(page, "AI로 기사 요약을 만들어 유료회원에게 제공해도 되나요?");
       await page.stubWindowOpen();
       await page.clickByText("공식 문의하기", { exact: true });
@@ -522,7 +533,8 @@ async function main() {
     }));
 
     const pageScenario = await runButtonCheck(page, "history-and-reopen", async () => {
-      await prepare(page);
+      await preparePage(page);
+      await openChatForQa(page);
       await ask(page, "AI 반도체 관련 기사를 찾고 싶어요");
       await page.click('[data-qa="chat-close"]');
       await page.waitFor("document.querySelector('[data-qa=\\\"chat-widget\\\"]') === null", 5000, "chat close");
@@ -545,7 +557,8 @@ async function main() {
 
     const mobileCheck = await runButtonCheck(page, "mobile-400x800", async () => {
       await page.send("Emulation.setDeviceMetricsOverride", { width: 400, height: 800, deviceScaleFactor: 1, mobile: false });
-      await prepare(page);
+      await preparePage(page);
+      await openChatForQa(page);
       const metrics = await page.evaluate(`({ width: window.innerWidth, scrollWidth: document.documentElement.scrollWidth, input: document.querySelector('[data-qa="chat-input"]')?.getBoundingClientRect().toJSON() })`);
       assert.ok(metrics.scrollWidth <= metrics.width + 1, `horizontal overflow: ${metrics.scrollWidth} > ${metrics.width}`);
       assert.ok(metrics.input && metrics.input.right <= metrics.width + 1, "chat input is outside the mobile viewport");
