@@ -1,6 +1,6 @@
 window.BIGKINDS_KNOWLEDGE_BASE = {
   schemaVersion: "1.0",
-  updatedAt: "2026-08-25",
+  updatedAt: "2026-09-14",
   disclaimer:
     "이 데이터셋은 공식 FAQ, 검증 정책, 내부 검색용 기초 문서를 합쳐 만든 챗봇 지식베이스입니다.",
   synonyms: {
@@ -313,7 +313,7 @@ window.BIGKINDS_KNOWLEDGE_BASE = {
     }
   }
 
-  kb.updatedAt = "2026-08-25";
+  kb.updatedAt = "2026-09-14";
   kb.disclaimer =
     "공식 FAQ, OpenAPI 이용 가이드, 검증된 정책을 바탕으로 만든 지식베이스입니다. 계약, 요금, 권한, 보안 경계가 필요한 질문은 담당자 확인이 필요합니다.";
 })();

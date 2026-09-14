@@ -41,5 +41,9 @@ yarn-error.log*
 /work/
 /artifacts/qa/
 
+# Raw Q&A snapshots are local import inputs and must never be published.
+imports/*.xlsx
+imports/*.xls
+
 # axhub import: local agent runtime state
 .axhub/
